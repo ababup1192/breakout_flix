@@ -279,26 +279,24 @@ mod Game {
 
     def brickCollisionStep(radius: Float32, acc: BrickFoldAcc, brickNode: SceneTree.Node): BrickFoldAcc =
         let pass = {bricks = brickNode :: acc#bricks, ballPos = acc#ballPos, ballVel = acc#ballVel, events = acc#events, index = acc#index + 1};
-        match SceneTree.staticBodyData(brickNode) {
+        let brickPos = (SceneTree.nodeTransform(brickNode))#position;
+        let brickSize = SceneTree.findRectShape(SceneTree.nodeChildren(brickNode))
+            |> Option.getWithDefault(Vec2D.zero());
+        let collision = forM (
+            bodyData <- SceneTree.staticBodyData(brickNode)
+                            |> Option.filter(bd -> not bd#destroyed);
+            (dir, diff) <- SceneTree.checkCircleRect(acc#ballPos, radius, brickPos, brickSize)
+        ) yield (bodyData, dir, diff);
+        match collision {
             case None => pass
-            case Some(bodyData) =>
-                if (bodyData#destroyed) pass
-                else {
-                    let brickPos = (SceneTree.nodeTransform(brickNode))#position;
-                    let brickSize = SceneTree.findRectShape(SceneTree.nodeChildren(brickNode))
-                        |> Option.getWithDefault(Vec2D.zero());
-                    match SceneTree.checkCircleRect(acc#ballPos, radius, brickPos, brickSize) {
-                        case None => pass
-                        case Some((dir, diff)) =>
-                            let updatedBrick = if (bodyData#isSolid) brickNode
-                                else SceneTree.modifyStaticBody(_ -> {destroyed = true | bodyData}, brickNode);
-                            let event = if (bodyData#isSolid) GameEvent.SolidBrickHit
-                                else GameEvent.BrickDestroyed(acc#index);
-                            let (newPos, newVel) = SceneTree.resolveCollision(acc#ballPos, acc#ballVel, radius, dir, diff);
-                            {bricks = updatedBrick :: acc#bricks, ballPos = newPos, ballVel = newVel,
-                             events = event :: acc#events, index = acc#index + 1}
-                    }
-                }
+            case Some((bodyData, dir, diff)) =>
+                let updatedBrick = if (bodyData#isSolid) brickNode
+                    else SceneTree.modifyStaticBody(_ -> {destroyed = true | bodyData}, brickNode);
+                let event = if (bodyData#isSolid) GameEvent.SolidBrickHit
+                    else GameEvent.BrickDestroyed(acc#index);
+                let (newPos, newVel) = SceneTree.resolveCollision(acc#ballPos, acc#ballVel, radius, dir, diff);
+                {bricks = updatedBrick :: acc#bricks, ballPos = newPos, ballVel = newVel,
+                 events = event :: acc#events, index = acc#index + 1}
         }
 
     // ========================================================================
