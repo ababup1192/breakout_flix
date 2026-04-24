@@ -19,14 +19,18 @@ mod SceneTree {
     pub type alias RigidBodyData = { velocity = Vec2D.Vec2, stuck = Bool }
     pub type alias StaticBodyData = { isSolid = Bool, destroyed = Bool }
 
+    pub enum NodeKind {
+        case Plain
+        case Sprite(SpriteData)
+        case Shape(CollisionShapeData)
+        case Kinematic(KinematicBodyData)
+        case Rigid(RigidBodyData)
+        case Fixed(StaticBodyData)
+        case Area
+    }
+
     pub enum Node {
-        case Node2D(String, Transform2D, List[Node])
-        case Sprite2D(String, Transform2D, SpriteData)
-        case CollisionShape2D(String, CollisionShapeData)
-        case KinematicBody2D(String, Transform2D, KinematicBodyData, List[Node])
-        case StaticBody2D(String, Transform2D, StaticBodyData, List[Node])
-        case RigidBody2D(String, Transform2D, RigidBodyData, List[Node])
-        case Area2D(String, Transform2D, List[Node])
+        case MkNode(String, Transform2D, NodeKind, List[Node])
     }
 
     pub enum Direction with Eq, ToString {
@@ -45,6 +49,31 @@ mod SceneTree {
     }
 
     // ========================================================================
+    // Constructors (Godot vocabulary)
+    // ========================================================================
+
+    pub def node2D(name: String, transform: Transform2D, children: List[Node]): Node =
+        Node.MkNode(name, transform, NodeKind.Plain, children)
+
+    pub def sprite2D(name: String, transform: Transform2D, sd: SpriteData): Node =
+        Node.MkNode(name, transform, NodeKind.Sprite(sd), Nil)
+
+    pub def collisionShape2D(name: String, shape: CollisionShapeData): Node =
+        Node.MkNode(name, identityTransform(), NodeKind.Shape(shape), Nil)
+
+    pub def kinematicBody2D(name: String, transform: Transform2D, bd: KinematicBodyData, children: List[Node]): Node =
+        Node.MkNode(name, transform, NodeKind.Kinematic(bd), children)
+
+    pub def rigidBody2D(name: String, transform: Transform2D, bd: RigidBodyData, children: List[Node]): Node =
+        Node.MkNode(name, transform, NodeKind.Rigid(bd), children)
+
+    pub def staticBody2D(name: String, transform: Transform2D, bd: StaticBodyData, children: List[Node]): Node =
+        Node.MkNode(name, transform, NodeKind.Fixed(bd), children)
+
+    pub def area2D(name: String, transform: Transform2D, children: List[Node]): Node =
+        Node.MkNode(name, transform, NodeKind.Area, children)
+
+    // ========================================================================
     // Basic Helpers
     // ========================================================================
 
@@ -52,37 +81,16 @@ mod SceneTree {
         {position = Vec2D.zero(), scale = Vec2D.one()}
 
     pub def nodeName(node: Node): String =
-        match node {
-            case Node.Node2D(name, _, _) => name
-            case Node.Sprite2D(name, _, _) => name
-            case Node.CollisionShape2D(name, _) => name
-            case Node.KinematicBody2D(name, _, _, _) => name
-            case Node.StaticBody2D(name, _, _, _) => name
-            case Node.RigidBody2D(name, _, _, _) => name
-            case Node.Area2D(name, _, _) => name
-        }
+        let Node.MkNode(n, _, _, _) = node; n
 
     pub def nodeChildren(node: Node): List[Node] =
-        match node {
-            case Node.Node2D(_, _, children) => children
-            case Node.Sprite2D(_, _, _) => Nil
-            case Node.CollisionShape2D(_, _) => Nil
-            case Node.KinematicBody2D(_, _, _, children) => children
-            case Node.StaticBody2D(_, _, _, children) => children
-            case Node.RigidBody2D(_, _, _, children) => children
-            case Node.Area2D(_, _, children) => children
-        }
+        let Node.MkNode(_, _, _, ch) = node; ch
 
     pub def nodeTransform(node: Node): Transform2D =
-        match node {
-            case Node.Node2D(_, t, _) => t
-            case Node.Sprite2D(_, t, _) => t
-            case Node.CollisionShape2D(_, _) => identityTransform()
-            case Node.KinematicBody2D(_, t, _, _) => t
-            case Node.StaticBody2D(_, t, _, _) => t
-            case Node.RigidBody2D(_, t, _, _) => t
-            case Node.Area2D(_, t, _) => t
-        }
+        let Node.MkNode(_, t, _, _) = node; t
+
+    pub def nodeKind(node: Node): NodeKind =
+        let Node.MkNode(_, _, k, _) = node; k
 
     // ========================================================================
     // Tree Search & Modification
@@ -97,97 +105,78 @@ mod SceneTree {
         else mapChildren(child -> mapNode(name, f, child), node)
 
     def mapChildren(f: Node -> Node, node: Node): Node =
-        match node {
-            case Node.Node2D(n, t, children) =>
-                Node.Node2D(n, t, List.map(f, children))
-            case Node.Sprite2D(_, _, _) => node
-            case Node.CollisionShape2D(_, _) => node
-            case Node.KinematicBody2D(n, t, d, children) =>
-                Node.KinematicBody2D(n, t, d, List.map(f, children))
-            case Node.StaticBody2D(n, t, d, children) =>
-                Node.StaticBody2D(n, t, d, List.map(f, children))
-            case Node.RigidBody2D(n, t, d, children) =>
-                Node.RigidBody2D(n, t, d, List.map(f, children))
-            case Node.Area2D(n, t, children) =>
-                Node.Area2D(n, t, List.map(f, children))
-        }
+        let Node.MkNode(n, t, k, children) = node;
+        Node.MkNode(n, t, k, List.map(f, children))
 
     // ========================================================================
     // Node Update Helpers
     // ========================================================================
 
     pub def updateKinematicBody(name: String, f: KinematicBodyData -> KinematicBodyData, root: Node): Node =
-        mapNode(name, node -> match node {
-            case Node.KinematicBody2D(n, t, bd, children) =>
-                Node.KinematicBody2D(n, t, f(bd), children)
-            case other => other
+        mapNode(name, node -> match nodeKind(node) {
+            case NodeKind.Kinematic(bd) =>
+                let Node.MkNode(n, t, _, ch) = node;
+                Node.MkNode(n, t, NodeKind.Kinematic(f(bd)), ch)
+            case _ => node
         }, root)
 
     pub def updateRigidBody(name: String, f: RigidBodyData -> RigidBodyData, root: Node): Node =
-        mapNode(name, node -> match node {
-            case Node.RigidBody2D(n, t, bd, children) =>
-                Node.RigidBody2D(n, t, f(bd), children)
-            case other => other
+        mapNode(name, node -> match nodeKind(node) {
+            case NodeKind.Rigid(bd) =>
+                let Node.MkNode(n, t, _, ch) = node;
+                Node.MkNode(n, t, NodeKind.Rigid(f(bd)), ch)
+            case _ => node
         }, root)
 
     pub def updateStaticBody(name: String, f: StaticBodyData -> StaticBodyData, root: Node): Node =
-        mapNode(name, node -> match node {
-            case Node.StaticBody2D(n, t, bd, children) =>
-                Node.StaticBody2D(n, t, f(bd), children)
-            case other => other
+        mapNode(name, node -> match nodeKind(node) {
+            case NodeKind.Fixed(bd) =>
+                let Node.MkNode(n, t, _, ch) = node;
+                Node.MkNode(n, t, NodeKind.Fixed(f(bd)), ch)
+            case _ => node
         }, root)
 
     pub def setNodePosition(name: String, pos: Vec2D.Vec2, root: Node): Node =
-        mapNode(name, node -> match node {
-            case Node.Node2D(n, t, children) =>
-                Node.Node2D(n, {position = pos | t}, children)
-            case Node.Sprite2D(n, t, sd) =>
-                Node.Sprite2D(n, {position = pos | t}, sd)
-            case Node.KinematicBody2D(n, t, bd, children) =>
-                Node.KinematicBody2D(n, {position = pos | t}, bd, children)
-            case Node.StaticBody2D(n, t, bd, children) =>
-                Node.StaticBody2D(n, {position = pos | t}, bd, children)
-            case Node.RigidBody2D(n, t, bd, children) =>
-                Node.RigidBody2D(n, {position = pos | t}, bd, children)
-            case Node.Area2D(n, t, children) =>
-                Node.Area2D(n, {position = pos | t}, children)
-            case Node.CollisionShape2D(_, _) => node
+        mapNode(name, node -> {
+            let Node.MkNode(n, t, k, ch) = node;
+            Node.MkNode(n, {position = pos | t}, k, ch)
         }, root)
 
     pub def rigidBodyData(node: Node): Option[RigidBodyData] =
-        match node {
-            case Node.RigidBody2D(_, _, bd, _) => Some(bd)
+        match nodeKind(node) {
+            case NodeKind.Rigid(bd) => Some(bd)
             case _ => None
         }
 
     pub def kinematicBodyData(node: Node): Option[KinematicBodyData] =
-        match node {
-            case Node.KinematicBody2D(_, _, bd, _) => Some(bd)
+        match nodeKind(node) {
+            case NodeKind.Kinematic(bd) => Some(bd)
             case _ => None
         }
 
     pub def staticBodyData(node: Node): Option[StaticBodyData] =
-        match node {
-            case Node.StaticBody2D(_, _, bd, _) => Some(bd)
+        match nodeKind(node) {
+            case NodeKind.Fixed(bd) => Some(bd)
             case _ => None
         }
 
     pub def modifyStaticBody(f: StaticBodyData -> StaticBodyData, node: Node): Node =
-        match node {
-            case Node.StaticBody2D(n, t, bd, children) =>
-                Node.StaticBody2D(n, t, f(bd), children)
-            case other => other
+        match nodeKind(node) {
+            case NodeKind.Fixed(bd) =>
+                let Node.MkNode(n, t, _, ch) = node;
+                Node.MkNode(n, t, NodeKind.Fixed(f(bd)), ch)
+            case _ => node
         }
 
     pub def findRectShape(children: List[Node]): Option[Vec2D.Vec2] =
-        List.findMap(child -> match child {
-            case Node.CollisionShape2D(_, CollisionShapeData.RectShape(size)) => Some(size)
+        List.findMap(child -> match nodeKind(child) {
+            case NodeKind.Shape(CollisionShapeData.RectShape(size)) => Some(size)
             case _ => None
         }, children)
 
     pub def findCircleShape(children: List[Node]): Option[Float32] =
-        List.findMap(child -> match child {
-            case Node.CollisionShape2D(_, CollisionShapeData.CircleShape(r)) => Some(r)
+        List.findMap(child -> match nodeKind(child) {
+            case NodeKind.Shape(CollisionShapeData.CircleShape(r)) => Some(r)
             case _ => None
         }, children)
 
@@ -204,28 +193,16 @@ mod SceneTree {
     // ========================================================================
 
     pub def collectDrawables(node: Node, parentPos: Vec2D.Vec2): List[(SpriteData, Vec2D.Vec2)] =
-        match node {
-            case Node.Node2D(_, transform, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
-                List.flatMap(child -> collectDrawables(child, globalPos), children)
-            case Node.Sprite2D(_, transform, spriteData) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
-                if (spriteData#visible) (spriteData, globalPos) :: Nil else Nil
-            case Node.CollisionShape2D(_, _) => Nil
-            case Node.KinematicBody2D(_, transform, _, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
-                List.flatMap(child -> collectDrawables(child, globalPos), children)
-            case Node.StaticBody2D(_, transform, bodyData, children) =>
-                if (bodyData#destroyed) Nil
-                else {
-                    let globalPos = Vec2D.add(parentPos, transform#position);
-                    List.flatMap(child -> collectDrawables(child, globalPos), children)
-                }
-            case Node.RigidBody2D(_, transform, _, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
-                List.flatMap(child -> collectDrawables(child, globalPos), children)
-            case Node.Area2D(_, transform, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
+        let Node.MkNode(_, transform, kind, children) = node;
+        let globalPos = Vec2D.add(parentPos, transform#position);
+        match kind {
+            case NodeKind.Sprite(sd) =>
+                if (sd#visible) (sd, globalPos) :: Nil else Nil
+            case NodeKind.Fixed(bd) =>
+                if (bd#destroyed) Nil
+                else List.flatMap(child -> collectDrawables(child, globalPos), children)
+            case NodeKind.Shape(_) => Nil
+            case _ =>
                 List.flatMap(child -> collectDrawables(child, globalPos), children)
         }
 
@@ -283,61 +260,43 @@ mod SceneTree {
     pub def collectBodies(node: Node): List[BodyInfo] =
         collectBodiesHelper(node, Vec2D.zero())
 
+    def extractShapes(name: String, globalPos: Vec2D.Vec2, isSolid: Bool, destroyed: Bool, children: List[Node]): List[BodyInfo] =
+        List.filterMap(child -> match nodeKind(child) {
+            case NodeKind.Shape(shape) => Some({
+                name = name,
+                position = globalPos,
+                shape = shape,
+                isSolid = isSolid,
+                destroyed = destroyed
+            })
+            case _ => None
+        }, children)
+
     def collectBodiesHelper(node: Node, parentPos: Vec2D.Vec2): List[BodyInfo] =
-        match node {
-            case Node.StaticBody2D(name, transform, bodyData, children) =>
-                if (bodyData#destroyed) Nil
+        let Node.MkNode(name, transform, kind, children) = node;
+        let globalPos = Vec2D.add(parentPos, transform#position);
+        match kind {
+            case NodeKind.Fixed(bd) =>
+                if (bd#destroyed) Nil
                 else {
-                    let globalPos = Vec2D.add(parentPos, transform#position);
-                    let shapes = List.filterMap(child -> match child {
-                        case Node.CollisionShape2D(_, shape) => Some({
-                            name = name,
-                            position = globalPos,
-                            shape = shape,
-                            isSolid = bodyData#isSolid,
-                            destroyed = bodyData#destroyed
-                        })
-                        case _ => None
-                    }, children);
+                    let shapes = extractShapes(name, globalPos, bd#isSolid, bd#destroyed, children);
                     let childBodies = List.flatMap(child -> collectBodiesHelper(child, globalPos), children);
                     List.append(shapes, childBodies)
                 }
-            case Node.KinematicBody2D(name, transform, _, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
-                let shapes = List.filterMap(child -> match child {
-                    case Node.CollisionShape2D(_, shape) => Some({
-                        name = name,
-                        position = globalPos,
-                        shape = shape,
-                        isSolid = true,
-                        destroyed = false
-                    })
-                    case _ => None
-                }, children);
+            case NodeKind.Kinematic(_) =>
+                let shapes = extractShapes(name, globalPos, true, false, children);
                 let childBodies = List.flatMap(child -> collectBodiesHelper(child, globalPos), children);
                 List.append(shapes, childBodies)
-            case Node.Area2D(name, transform, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
-                let shapes = List.filterMap(child -> match child {
-                    case Node.CollisionShape2D(_, shape) => Some({
-                        name = name,
-                        position = globalPos,
-                        shape = shape,
-                        isSolid = false,
-                        destroyed = false
-                    })
-                    case _ => None
-                }, children);
+            case NodeKind.Area =>
+                let shapes = extractShapes(name, globalPos, false, false, children);
                 let childBodies = List.flatMap(child -> collectBodiesHelper(child, globalPos), children);
                 List.append(shapes, childBodies)
-            case Node.Node2D(_, transform, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
+            case NodeKind.Plain =>
                 List.flatMap(child -> collectBodiesHelper(child, globalPos), children)
-            case Node.RigidBody2D(_, transform, _, children) =>
-                let globalPos = Vec2D.add(parentPos, transform#position);
+            case NodeKind.Rigid(_) =>
                 List.flatMap(child -> collectBodiesHelper(child, globalPos), children)
-            case Node.Sprite2D(_, _, _) => Nil
-            case Node.CollisionShape2D(_, _) => Nil
+            case NodeKind.Sprite(_) => Nil
+            case NodeKind.Shape(_) => Nil
         }
 
     // ========================================================================
@@ -347,35 +306,30 @@ mod SceneTree {
     pub def physicsStep(root: Node, dt: Float32, screenSize: Vec2D.Vec2): Node =
         let paddlePos = findNode("Paddle", root) |> Option.map(n -> (nodeTransform(n))#position) |> Option.getWithDefault(Vec2D.zero());
         let paddleWidth = findNode("Paddle", root)
-            |> Option.flatMap(n -> List.findMap(child -> match child {
-                case Node.CollisionShape2D(_, CollisionShapeData.RectShape(size)) => Some(size#x)
+            |> Option.flatMap(n -> List.findMap(child -> match nodeKind(child) {
+                case NodeKind.Shape(CollisionShapeData.RectShape(size)) => Some(size#x)
                 case _ => None
             }, nodeChildren(n)))
             |> Option.getWithDefault(100.0f32);
         physicsStepNode(root, dt, screenSize, paddlePos, paddleWidth)
 
     def physicsStepNode(node: Node, dt: Float32, screenSize: Vec2D.Vec2, paddlePos: Vec2D.Vec2, paddleWidth: Float32): Node =
-        match node {
-            case Node.KinematicBody2D(name, transform, bodyData, children) =>
+        let Node.MkNode(name, transform, kind, children) = node;
+        match kind {
+            case NodeKind.Kinematic(bodyData) =>
                 let newX = transform#position#x + bodyData#velocity#x * dt;
                 let clampedX = Float32.max(0.0f32, Float32.min(screenSize#x - paddleWidth, newX));
                 let newTransform = {position = {x = clampedX, y = transform#position#y} | transform};
-                Node.KinematicBody2D(name, newTransform, bodyData, children)
-            case Node.RigidBody2D(name, transform, bodyData, children) =>
+                Node.MkNode(name, newTransform, kind, children)
+            case NodeKind.Rigid(bodyData) =>
                 if (bodyData#stuck) {
-                    let ballRadius = List.findMap(child -> match child {
-                        case Node.CollisionShape2D(_, CollisionShapeData.CircleShape(r)) => Some(r)
-                        case _ => None
-                    }, children) |> Option.getWithDefault(12.5f32);
+                    let ballRadius = findCircleShape(children) |> Option.getWithDefault(12.5f32);
                     let bx = paddlePos#x + paddleWidth / 2.0f32 - ballRadius;
                     let by = paddlePos#y - ballRadius * 2.0f32;
                     let newTransform = {position = {x = bx, y = by} | transform};
-                    Node.RigidBody2D(name, newTransform, bodyData, children)
+                    Node.MkNode(name, newTransform, kind, children)
                 } else {
-                    let ballSize = List.findMap(child -> match child {
-                        case Node.CollisionShape2D(_, CollisionShapeData.CircleShape(r)) => Some(r * 2.0f32)
-                        case _ => None
-                    }, children) |> Option.getWithDefault(25.0f32);
+                    let ballSize = findCircleShape(children) |> Option.map(r -> r * 2.0f32) |> Option.getWithDefault(25.0f32);
                     let newX = transform#position#x + bodyData#velocity#x * dt;
                     let newY = transform#position#y + bodyData#velocity#y * dt;
                     let vx0 = bodyData#velocity#x;
@@ -385,13 +339,10 @@ mod SceneTree {
                     let (ny1, vy1) = if (newY <= 0.0f32) (0.0f32, Float32.abs(vy0)) else (newY, vy0);
                     let newTransform = {position = {x = nx2, y = ny1} | transform};
                     let newBodyData = {velocity = {x = vx2, y = vy1} | bodyData};
-                    Node.RigidBody2D(name, newTransform, newBodyData, children)
+                    Node.MkNode(name, newTransform, NodeKind.Rigid(newBodyData), children)
                 }
-            case Node.Node2D(name, transform, children) =>
-                Node.Node2D(name, transform, List.map(child -> physicsStepNode(child, dt, screenSize, paddlePos, paddleWidth), children))
-            case Node.StaticBody2D(_, _, _, _) => node
-            case Node.Sprite2D(_, _, _) => node
-            case Node.CollisionShape2D(_, _) => node
-            case Node.Area2D(_, _, _) => node
+            case NodeKind.Plain =>
+                Node.MkNode(name, transform, kind, List.map(child -> physicsStepNode(child, dt, screenSize, paddlePos, paddleWidth), children))
+            case _ => node
         }
 }

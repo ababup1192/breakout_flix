@@ -270,7 +270,7 @@ mod Game {
                 |> Option.getWithDefault(Nil);
             let init: BrickFoldAcc = {bricks = Nil, ballPos = ballPos, ballVel = ballVel, events = Nil, index = 0};
             let result = List.foldLeft((acc, brick) -> brickCollisionStep(radius, acc, brick), init, brickNodes);
-            let newBricksNode = SceneTree.Node.Node2D("Bricks", SceneTree.identityTransform(), List.reverse(result#bricks));
+            let newBricksNode = SceneTree.node2D("Bricks", SceneTree.identityTransform(), List.reverse(result#bricks));
             let scene1 = SceneTree.mapNode("Bricks", _ -> newBricksNode, state#scene);
             let scene2 = SceneTree.updateRigidBody("Ball", bd -> {velocity = result#ballVel | bd},
                 SceneTree.setNodePosition("Ball", result#ballPos, scene1));

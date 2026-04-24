@@ -116,32 +116,32 @@ def mkTestStateWithShake(
     stuck: Bool,
     shake: Float32
 ): Game.GameState =
-    let scene = SceneTree.Node.Node2D("Root", SceneTree.identityTransform(),
-        SceneTree.Node.Node2D("Bricks", SceneTree.identityTransform(), Nil) ::
-        SceneTree.Node.KinematicBody2D("Paddle",
+    let scene = SceneTree.node2D("Root", SceneTree.identityTransform(),
+        SceneTree.node2D("Bricks", SceneTree.identityTransform(), Nil) ::
+        SceneTree.kinematicBody2D("Paddle",
             {position = {x = px, y = py}, scale = Vec2D.one()},
             {velocity = Vec2D.zero()},
-            SceneTree.Node.Sprite2D("PaddleSprite", SceneTree.identityTransform(),
+            SceneTree.sprite2D("PaddleSprite", SceneTree.identityTransform(),
                 {size = {x = playerWidth(), y = playerHeight()}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "paddle", visible = true}
             ) ::
-            SceneTree.Node.CollisionShape2D("PaddleCollider",
+            SceneTree.collisionShape2D("PaddleCollider",
                 SceneTree.CollisionShapeData.RectShape({x = playerWidth(), y = playerHeight()})
             ) :: Nil
         ) ::
-        SceneTree.Node.RigidBody2D("Ball",
+        SceneTree.rigidBody2D("Ball",
             {position = {x = bx, y = by}, scale = Vec2D.one()},
             {velocity = {x = vx, y = vy}, stuck = stuck},
-            SceneTree.Node.Sprite2D("BallSprite", SceneTree.identityTransform(),
+            SceneTree.sprite2D("BallSprite", SceneTree.identityTransform(),
                 {size = {x = ballRadiusConst() * 2.0f32, y = ballRadiusConst() * 2.0f32},
                  color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "ball", visible = true}
             ) ::
-            SceneTree.Node.CollisionShape2D("BallCollider",
+            SceneTree.collisionShape2D("BallCollider",
                 SceneTree.CollisionShapeData.CircleShape(ballRadiusConst())
             ) :: Nil
         ) ::
-        SceneTree.Node.Area2D("DeathZone",
+        SceneTree.area2D("DeathZone",
             {position = {x = 0.0f32, y = Int32.toFloat32(screenHeight())}, scale = Vec2D.one()},
-            SceneTree.Node.CollisionShape2D("DeathZoneShape",
+            SceneTree.collisionShape2D("DeathZoneShape",
                 SceneTree.CollisionShapeData.RectShape({x = Int32.toFloat32(screenWidth()), y = 20.0f32})
             ) :: Nil
         )
@@ -229,10 +229,9 @@ def testProcessInputSetsPaddleVelocityLeft(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, false);
     let result = run { processInput(state) } with withMockInput(Set#{keyA()});
     let paddleNode = SceneTree.findNode("Paddle", result#scene);
-    let velX = paddleNode |> Option.flatMap(n -> match n {
-        case SceneTree.Node.KinematicBody2D(_, _, bd, _) => Some(bd#velocity#x)
-        case _ => None
-    });
+    let velX = paddleNode
+        |> Option.flatMap(SceneTree.kinematicBodyData)
+        |> Option.map(bd -> bd#velocity#x);
     Assert.assertTrue(Option.getWithDefault(0.0f32, velX) < 0.0f32)
 
 @Test
@@ -240,10 +239,9 @@ def testProcessInputSetsPaddleVelocityRight(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, false);
     let result = run { processInput(state) } with withMockInput(Set#{keyD()});
     let paddleNode = SceneTree.findNode("Paddle", result#scene);
-    let velX = paddleNode |> Option.flatMap(n -> match n {
-        case SceneTree.Node.KinematicBody2D(_, _, bd, _) => Some(bd#velocity#x)
-        case _ => None
-    });
+    let velX = paddleNode
+        |> Option.flatMap(SceneTree.kinematicBodyData)
+        |> Option.map(bd -> bd#velocity#x);
     Assert.assertTrue(Option.getWithDefault(0.0f32, velX) > 0.0f32)
 
 @Test

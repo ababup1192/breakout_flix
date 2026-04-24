@@ -8,22 +8,22 @@ mod BreakoutScene {
     pub def buildBrickSubtree(level: Game.LevelData): SceneTree.Node =
         let brickNodes = level#bricks |> List.zipWithIndex |> List.map(match (idx, brick) ->
             let idxStr = Int32.toString(idx);
-            SceneTree.Node.StaticBody2D(
+            SceneTree.staticBody2D(
                 "Brick_${idxStr}",
                 {position = brick#position, scale = Vec2D.one()},
                 {isSolid = brick#isSolid, destroyed = false},
-                SceneTree.Node.Sprite2D(
+                SceneTree.sprite2D(
                     "BrickSprite_${idxStr}",
                     SceneTree.identityTransform(),
                     {size = brick#size, color = brick#color, texture = brick#texture, visible = true}
                 ) ::
-                SceneTree.Node.CollisionShape2D(
+                SceneTree.collisionShape2D(
                     "BrickCollider_${idxStr}",
                     SceneTree.CollisionShapeData.RectShape(brick#size)
                 ) :: Nil
             )
         );
-        SceneTree.Node.Node2D("Bricks", SceneTree.identityTransform(), brickNodes)
+        SceneTree.node2D("Bricks", SceneTree.identityTransform(), brickNodes)
 
     pub def buildInitialScene(width: Int32, height: Int32, level: Game.LevelData): SceneTree.Node =
         let sw = Int32.toFloat32(width);
@@ -34,40 +34,40 @@ mod BreakoutScene {
         let ballY = playerY - Game.ballRadiusConst() * 2.0f32;
         let ballDiam = Game.ballRadiusConst() * 2.0f32;
 
-        SceneTree.Node.Node2D("Root", SceneTree.identityTransform(),
-            SceneTree.Node.Sprite2D("Background",
+        SceneTree.node2D("Root", SceneTree.identityTransform(),
+            SceneTree.sprite2D("Background",
                 SceneTree.identityTransform(),
                 {size = {x = sw, y = sh}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "background", visible = true}
             ) ::
             buildBrickSubtree(level)
             ::
-            SceneTree.Node.KinematicBody2D("Paddle",
+            SceneTree.kinematicBody2D("Paddle",
                 {position = {x = playerX, y = playerY}, scale = Vec2D.one()},
                 {velocity = Vec2D.zero()},
-                SceneTree.Node.Sprite2D("PaddleSprite",
+                SceneTree.sprite2D("PaddleSprite",
                     SceneTree.identityTransform(),
                     {size = {x = Game.playerWidth(), y = Game.playerHeight()}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "paddle", visible = true}
                 ) ::
-                SceneTree.Node.CollisionShape2D("PaddleCollider",
+                SceneTree.collisionShape2D("PaddleCollider",
                     SceneTree.CollisionShapeData.RectShape({x = Game.playerWidth(), y = Game.playerHeight()})
                 ) :: Nil
             )
             ::
-            SceneTree.Node.RigidBody2D("Ball",
+            SceneTree.rigidBody2D("Ball",
                 {position = {x = ballX, y = ballY}, scale = Vec2D.one()},
                 {velocity = {x = Game.initialBallVelocityX(), y = Game.initialBallVelocityY()}, stuck = true},
-                SceneTree.Node.Sprite2D("BallSprite",
+                SceneTree.sprite2D("BallSprite",
                     SceneTree.identityTransform(),
                     {size = {x = ballDiam, y = ballDiam}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "ball", visible = true}
                 ) ::
-                SceneTree.Node.CollisionShape2D("BallCollider",
+                SceneTree.collisionShape2D("BallCollider",
                     SceneTree.CollisionShapeData.CircleShape(Game.ballRadiusConst())
                 ) :: Nil
             )
             ::
-            SceneTree.Node.Area2D("DeathZone",
+            SceneTree.area2D("DeathZone",
                 {position = {x = 0.0f32, y = sh}, scale = Vec2D.one()},
-                SceneTree.Node.CollisionShape2D("DeathZoneShape",
+                SceneTree.collisionShape2D("DeathZoneShape",
                     SceneTree.CollisionShapeData.RectShape({x = sw, y = 20.0f32})
                 ) :: Nil
             )
