@@ -94,14 +94,25 @@ def testParseLevelNonSolidBrick(): Unit \ Assert =
 //   ballX   = 350 + 100/2 - 12.5 = 387.5
 //   ballY   = 580 - 12.5*2 = 555
 
+def dummyFileRead(f: Unit -> a \ ef): a \ ef - Fs.FileRead =
+    run { f() } with handler Fs.FileRead {
+        def read(_path, resume) = resume(Ok("1"))
+        def readBytes(_path, resume) = resume(Ok(Vector#{}))
+        def readLines(_path, resume) = resume(Ok("1" :: Nil))
+    }
+
 @Test
-def testInitGamePlayerPosition(): Unit \ Assert + IO =
-    let state = initGame(800, 600, dummyTextures());
+def testInitGamePlayerPosition(): Unit \ Assert =
+    let state = run {
+        initGame(800, 600, dummyTextures())
+    } with dummyFileRead;
     Assert.assertEq(expected = 350.0f32, state#player#position#x);
     Assert.assertEq(expected = 580.0f32, state#player#position#y)
 
 @Test
-def testInitGameBallPosition(): Unit \ Assert + IO =
-    let state = initGame(800, 600, dummyTextures());
+def testInitGameBallPosition(): Unit \ Assert =
+    let state = run {
+        initGame(800, 600, dummyTextures())
+    } with dummyFileRead;
     Assert.assertEq(expected = 387.5f32, state#ballPos#x);
     Assert.assertEq(expected = 555.0f32, state#ballPos#y)

@@ -295,9 +295,8 @@ def drawSprite(shader: Int32, texture: Int32, vao: Int32, pos: Vec2, size: Vec2,
 /// - `levelHeight`: レベル描画領域の高さ（ピクセル）
 /// - `textures`: テクスチャID群
 /// - 戻り値: パース済み `GameLevel`
-def loadLevel(path: String, levelWidth: Int32, levelHeight: Int32, textures: Textures): GameLevel \ IO =
-    let result = Fs.FileRead.runWithIO(() -> Fs.FileRead.read(path));
-    match result {
+def loadLevel(path: String, levelWidth: Int32, levelHeight: Int32, textures: Textures): GameLevel \ Fs.FileRead =
+    match Fs.FileRead.read(path) {
         case Ok(data) => parseLevel(data, levelWidth, levelHeight, textures)
         case Err(_) => bug!("Failed to load level: ${path}")
     }
@@ -394,7 +393,7 @@ def tileColor(tileType: Int32): Vec3 =
 /// - `height`: 画面高さ（ピクセル）
 /// - `textures`: テクスチャID群
 /// - 戻り値: 初期化済み `GameState`
-def initGame(width: Int32, height: Int32, textures: Textures): GameState \ IO =
+def initGame(width: Int32, height: Int32, textures: Textures): GameState \ Fs.FileRead =
     let level1 = loadLevel("levels/one.lvl", width, height / 2, textures);
     let level2 = loadLevel("levels/two.lvl", width, height / 2, textures);
     let level3 = loadLevel("levels/three.lvl", width, height / 2, textures);
@@ -510,7 +509,9 @@ def main(): Unit \ IO =
     let textures = loadTextures();
 
     println("Loading levels...");
-    let state = initGame(screenWidth(), screenHeight(), textures);
+    let state = run {
+        initGame(screenWidth(), screenHeight(), textures)
+    } with Fs.FileRead.runWithIO;
     println("Game ready! Press ESC or close window to exit.");
 
 
