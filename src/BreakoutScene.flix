@@ -178,6 +178,38 @@ mod BreakoutScene {
         SceneTree.mapNode(bricksName(), _ -> newBricksNode, scene)
 
     // ========================================================================
+    // Brick Inspection
+    // ========================================================================
+
+    pub type alias BrickRect = { pos = Vec2D.Vec2, size = Vec2D.Vec2 }
+
+    pub def brickRect(brickNode: SceneTree.Node): BrickRect =
+        {
+            pos = (SceneTree.nodeTransform(brickNode))#position,
+            size = SceneTree.findRectShape(SceneTree.nodeChildren(brickNode))
+                |> Option.getWithDefault(Vec2D.zero())
+        }
+
+    pub def brickBodyData(brickNode: SceneTree.Node): Option[SceneTree.StaticBodyData] =
+        SceneTree.staticBodyData(brickNode)
+
+    pub def destroyBrick(bodyData: SceneTree.StaticBodyData, brickNode: SceneTree.Node): SceneTree.Node =
+        SceneTree.modifyStaticBody(_ -> {destroyed = true | bodyData}, brickNode)
+
+    // ========================================================================
+    // Physics Step
+    // ========================================================================
+
+    pub def physicsStep(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.Node =
+        let paddle = paddleSnapshot(scene);
+        let config = {
+            screenSize = screenSize,
+            anchorPos = paddle#pos,
+            anchorWidth = paddle#size#x
+        };
+        SceneTree.physicsStep(scene, dt, config)
+
+    // ========================================================================
     // Rendering: apply shake offset
     // ========================================================================
 

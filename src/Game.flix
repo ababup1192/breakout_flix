@@ -182,13 +182,8 @@ mod Game {
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
         let s1 = processInput(state);
-        let paddle = BreakoutScene.paddleSnapshot(s1#scene);
-        let config = {
-            screenSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())},
-            anchorPos = paddle#pos,
-            anchorWidth = paddle#size#x
-        };
-        let s2 = {scene = SceneTree.physicsStep(s1#scene, dt, config) | s1};
+        let screenSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())};
+        let s2 = {scene = BreakoutScene.physicsStep(s1#scene, dt, screenSize) | s1};
         let (s3, allEvents) = GameAction.unpack(forM (
             sa <- doBrickCollisions(s2);
             sb <- doPaddleCollision(sa);
@@ -239,19 +234,17 @@ mod Game {
 
     def brickCollisionStep(radius: Float32, acc: BrickFoldAcc, brickNode: SceneTree.Node): BrickFoldAcc =
         let pass = {bricks = brickNode :: acc#bricks, ballPos = acc#ballPos, ballVel = acc#ballVel, events = acc#events, index = acc#index + 1};
-        let brickPos = (SceneTree.nodeTransform(brickNode))#position;
-        let brickSize = SceneTree.findRectShape(SceneTree.nodeChildren(brickNode))
-            |> Option.getWithDefault(Vec2D.zero());
+        let br = BreakoutScene.brickRect(brickNode);
         let collision = forM (
-            bodyData <- SceneTree.staticBodyData(brickNode)
+            bodyData <- BreakoutScene.brickBodyData(brickNode)
                             |> Option.filter(bd -> not bd#destroyed);
-            (dir, diff) <- SceneTree.checkCircleRect(acc#ballPos, radius, brickPos, brickSize)
+            (dir, diff) <- SceneTree.checkCircleRect(acc#ballPos, radius, br#pos, br#size)
         ) yield (bodyData, dir, diff);
         match collision {
             case None => pass
             case Some((bodyData, dir, diff)) =>
                 let updatedBrick = if (bodyData#isSolid) brickNode
-                    else SceneTree.modifyStaticBody(_ -> {destroyed = true | bodyData}, brickNode);
+                    else BreakoutScene.destroyBrick(bodyData, brickNode);
                 let event = if (bodyData#isSolid) GameEvent.SolidBrickHit
                     else GameEvent.BrickDestroyed(acc#index);
                 let (newPos, newVel) = SceneTree.resolveCollision(acc#ballPos, acc#ballVel, radius, dir, diff);

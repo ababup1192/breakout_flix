@@ -153,20 +153,14 @@ def mkTestStateWithShake(
         shakeTime = shake
     }
 
-def mkTestPhysicsConfig(state: Game.GameState): SceneTree.PhysicsConfig =
-    {
-        screenSize = {x = 800.0f32, y = 600.0f32},
-        anchorPos = BreakoutScene.paddlePos(state#scene),
-        anchorWidth = (BreakoutScene.paddleSize(state#scene))#x
-    }
-
 // --- physicsStep via engine (replaces moveBall tests) ---
+
+def testScreenSize(): Vec2D.Vec2 = {x = 800.0f32, y = 600.0f32}
 
 @Test
 def testPhysicsStepBallStuck(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let config = mkTestPhysicsConfig(state);
-    let result = {scene = SceneTree.physicsStep(state#scene, 0.016f32, config) | state};
+    let result = {scene = BreakoutScene.physicsStep(state#scene, 0.016f32, testScreenSize()) | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let expectedX = 350.0f32 + playerWidth() / 2.0f32 - ballRadiusConst();
     let expectedY = 580.0f32 - ballRadiusConst() * 2.0f32;
@@ -176,8 +170,7 @@ def testPhysicsStepBallStuck(): Unit \ Assert =
 @Test
 def testPhysicsStepBallNormal(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 300.0f32, 100.0f32, -350.0f32, false);
-    let config = mkTestPhysicsConfig(state);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let result = {scene = BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()) | state};
     let pos = BreakoutScene.ballPos(result#scene);
     Assert.assertEq(expected = 500.0f32, pos#x);
     Assert.assertEq(expected = 0.0f32, pos#y)
@@ -185,8 +178,7 @@ def testPhysicsStepBallNormal(): Unit \ Assert =
 @Test
 def testPhysicsStepBallLeftWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 5.0f32, 300.0f32, -100.0f32, 0.0f32, false);
-    let config = mkTestPhysicsConfig(state);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let result = {scene = BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()) | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#x);
@@ -197,8 +189,7 @@ def testPhysicsStepBallRightWall(): Unit \ Assert =
     let ballSize = ballRadiusConst() * 2.0f32;
     let startX = Int32.toFloat32(screenWidth()) - ballSize - 10.0f32;
     let state = mkTestState(350.0f32, 580.0f32, startX, 300.0f32, 200.0f32, 0.0f32, false);
-    let config = mkTestPhysicsConfig(state);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let result = {scene = BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()) | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = Int32.toFloat32(screenWidth()) - ballSize, pos#x);
@@ -207,8 +198,7 @@ def testPhysicsStepBallRightWall(): Unit \ Assert =
 @Test
 def testPhysicsStepBallTopWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 5.0f32, 0.0f32, -100.0f32, false);
-    let config = mkTestPhysicsConfig(state);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let result = {scene = BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()) | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#y);
