@@ -16,12 +16,11 @@ mod Game {
         case SolidBrickHit
     }
 
-    pub type alias Vec2 = {x = Float32, y = Float32}
     pub type alias Vec3 = {r = Float32, g = Float32, b = Float32}
 
     pub type alias GameObject = {
-        position = Vec2,
-        size = Vec2,
+        position = Vec2D.Vec2,
+        size = Vec2D.Vec2,
         color = Vec3,
         isSolid = Bool,
         destroyed = Bool,
@@ -36,14 +35,14 @@ mod Game {
         levels = List[GameLevel],
         currentLevel = Int32,
         player = GameObject,
-        ballPos = Vec2,
-        ballVelocity = Vec2,
+        ballPos = Vec2D.Vec2,
+        ballVelocity = Vec2D.Vec2,
         ballRadius = Float32,
         ballStuck = Bool,
         shakeTime = Float32
     }
 
-    type alias BrickFoldAcc = (List[GameObject], Vec2, Vec2, List[GameEvent], Int32)
+    type alias BrickFoldAcc = (List[GameObject], Vec2D.Vec2, Vec2D.Vec2, List[GameEvent], Int32)
 
     pub type alias TextureRegistry = Map[String, Int32]
 
@@ -296,18 +295,8 @@ mod Game {
     // Collision Detection (LearnOpenGL Circle-AABB)
     // ========================================================================
 
-    /// Newton法によるFloat32平方根
-    def sqrt32(v: Float32): Float32 =
-        if (v <= 0.0f32) 0.0f32
-        else newtonSqrt(v, v, 15)
-
-    @Tailrec
-    def newtonSqrt(v: Float32, x: Float32, n: Int32): Float32 =
-        if (n <= 0) x
-        else newtonSqrt(v, (x + v / x) / 2.0f32, n - 1)
-
     /// 差分ベクトルが最も近いコンパス方向を返す
-    pub def vectorDirection(target: Vec2): Direction =
+    pub def vectorDirection(target: Vec2D.Vec2): Direction =
         let dotUp    = target#y;
         let dotRight = target#x;
         let dotDown  = -1.0f32 * target#y;
@@ -319,25 +308,22 @@ mod Game {
         d3
 
     /// Circle-AABB衝突判定: (衝突有無, 方向, 差分ベクトル) を返す
-    pub def checkCollisionCircleAABB(ballPos: Vec2, radius: Float32, box: GameObject): (Bool, Direction, Vec2) =
-        let ballCenter = {x = ballPos#x + radius, y = ballPos#y + radius};
-        let halfExtents = {x = box#size#x / 2.0f32, y = box#size#y / 2.0f32};
-        let aabbCenter = {x = box#position#x + halfExtents#x, y = box#position#y + halfExtents#y};
-        let diff = {x = ballCenter#x - aabbCenter#x, y = ballCenter#y - aabbCenter#y};
-        let clamped = {
-            x = Float32.max(-1.0f32 * halfExtents#x, Float32.min(halfExtents#x, diff#x)),
-            y = Float32.max(-1.0f32 * halfExtents#y, Float32.min(halfExtents#y, diff#y))
-        };
-        let closest = {x = aabbCenter#x + clamped#x, y = aabbCenter#y + clamped#y};
-        let difference = {x = closest#x - ballCenter#x, y = closest#y - ballCenter#y};
-        let distSq = difference#x * difference#x + difference#y * difference#y;
+    pub def checkCollisionCircleAABB(ballPos: Vec2D.Vec2, radius: Float32, box: GameObject): (Bool, Direction, Vec2D.Vec2) =
+        let ballCenter = Vec2D.add(ballPos, {x = radius, y = radius});
+        let halfExtents = Vec2D.div(box#size, 2.0f32);
+        let aabbCenter = Vec2D.add(box#position, halfExtents);
+        let diff = Vec2D.sub(ballCenter, aabbCenter);
+        let clamped = Vec2D.clampSymmetric(diff, halfExtents);
+        let closest = Vec2D.add(aabbCenter, clamped);
+        let difference = Vec2D.sub(closest, ballCenter);
+        let distSq = Vec2D.lengthSquared(difference);
         if (distSq < radius * radius)
             (true, vectorDirection(difference), difference)
         else
-            (false, Direction.Up, {x = 0.0f32, y = 0.0f32})
+            (false, Direction.Up, Vec2D.zero())
 
     /// ボールの反射処理: 衝突方向に応じて位置と速度を補正
-    def reflectBall(bPos: Vec2, bVel: Vec2, radius: Float32, dir: Direction, diff: Vec2): (Vec2, Vec2) =
+    def reflectBall(bPos: Vec2D.Vec2, bVel: Vec2D.Vec2, radius: Float32, dir: Direction, diff: Vec2D.Vec2): (Vec2D.Vec2, Vec2D.Vec2) =
         let horizontal = (dir == Direction.Left) or (dir == Direction.Right);
         if (horizontal) {
             let penetration = radius - Float32.abs(diff#x);
@@ -408,16 +394,13 @@ mod Game {
             let distance = (state#ballPos#x + state#ballRadius) - centerBoard;
             let percentage = distance / (state#player#size#x / 2.0f32);
             let strength = 2.0f32;
-            let oldVx = state#ballVelocity#x;
-            let oldVy = state#ballVelocity#y;
-            let speed = sqrt32(oldVx * oldVx + oldVy * oldVy);
+            let speed = Vec2D.length(state#ballVelocity);
             let newVx = initialBallVelocityX() * percentage * strength;
             let newVy = -1.0f32 * Float32.abs(state#ballVelocity#y);
-            let len = sqrt32(newVx * newVx + newVy * newVy);
-            let finalVx = if (len > 0.0f32) newVx / len * speed else newVx;
-            let finalVy = if (len > 0.0f32) newVy / len * speed else newVy;
+            let newVel = Vec2D.normalized({x = newVx, y = newVy});
+            let finalVel = Vec2D.mul(newVel, speed);
             GameAction.of(
-                {ballVelocity = {x = finalVx, y = finalVy} | state},
+                {ballVelocity = finalVel | state},
                 GameEvent.PaddleHit :: Nil)
         }
 }

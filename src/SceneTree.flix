@@ -1,7 +1,7 @@
 // Scene tree for declarative rendering
 
 mod SceneTree {
-    pub type alias Transform2D = {position = Game.Vec2, scale = Game.Vec2}
+    pub type alias Transform2D = {position = Vec2D.Vec2, scale = Vec2D.Vec2}
 
     pub enum Node {
         case Group(String, Transform2D, List[Node])
@@ -10,28 +10,28 @@ mod SceneTree {
     }
 
     pub type alias SpriteData = {
-        size = Game.Vec2,
+        size = Vec2D.Vec2,
         color = Game.Vec3,
         texture = String,
         visible = Bool
     }
 
     pub enum CollisionShapeData {
-        case RectShape(Game.Vec2)
+        case RectShape(Vec2D.Vec2)
         case CircleShape(Float32)
     }
 
     pub def identityTransform(): Transform2D =
-        {position = {x = 0.0f32, y = 0.0f32}, scale = {x = 1.0f32, y = 1.0f32}}
+        {position = Vec2D.zero(), scale = Vec2D.one()}
 
     /// Collect all visible sprites with their global positions
-    pub def collectDrawables(node: Node, parentPos: Game.Vec2): List[(SpriteData, Game.Vec2)] =
+    pub def collectDrawables(node: Node, parentPos: Vec2D.Vec2): List[(SpriteData, Vec2D.Vec2)] =
         match node {
             case Node.Group(_, transform, children) =>
-                let globalPos = {x = parentPos#x + transform#position#x, y = parentPos#y + transform#position#y};
+                let globalPos = Vec2D.add(parentPos, transform#position);
                 List.flatMap(child -> collectDrawables(child, globalPos), children)
             case Node.Sprite(_, transform, spriteData, children) =>
-                let globalPos = {x = parentPos#x + transform#position#x, y = parentPos#y + transform#position#y};
+                let globalPos = Vec2D.add(parentPos, transform#position);
                 let self = if (spriteData#visible) (spriteData, globalPos) :: Nil else Nil;
                 let childDrawables = List.flatMap(child -> collectDrawables(child, globalPos), children);
                 List.append(self, childDrawables)

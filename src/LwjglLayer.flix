@@ -166,7 +166,7 @@ mod LwjglLayer {
         let loc = GL20.glGetUniformLocation(shader, "projection");
         GL20.glUniformMatrix4fv(loc, false, proj)
 
-    def drawSprite(shader: Int32, texture: Int32, vao: Int32, pos: Game.Vec2, size: Game.Vec2, color: Game.Vec3): Unit \ IO =
+    def drawSprite(shader: Int32, texture: Int32, vao: Int32, pos: Vec2D.Vec2, size: Vec2D.Vec2, color: Game.Vec3): Unit \ IO =
         GL20.glUseProgram(shader);
 
         let model = Array#{
@@ -197,7 +197,7 @@ mod LwjglLayer {
         GL11.glClearColor(0.0f32, 0.0f32, 0.0f32, 1.0f32);
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
 
-        let drawables = SceneTree.collectDrawables(scene, {x = 0.0f32, y = 0.0f32});
+        let drawables = SceneTree.collectDrawables(scene, Vec2D.zero());
         List.forEach(match (spriteData, globalPos) -> {
             match Map.get(spriteData#texture, registry) {
                 case Some(texId) => drawSprite(shader, texId, vao, globalPos, spriteData#size, spriteData#color)

@@ -1,22 +1,14 @@
 // Scene builder: converts GameState to SceneTree for rendering
 
 mod BreakoutScene {
-    import java.lang.Math
-
     def white(): Game.Vec3 = {r = 1.0f32, g = 1.0f32, b = 1.0f32}
 
-    def sin32(x: Float32): Float32 =
-        Float64.truncateToFloat32(unchecked_cast(Math.sin(Float32.toFloat64(x)) as _ \ {}))
-
-    def cos32(x: Float32): Float32 =
-        Float64.truncateToFloat32(unchecked_cast(Math.cos(Float32.toFloat64(x)) as _ \ {}))
-
     /// shakeTime > 0 のとき sin/cos でオフセットを生成
-    def shakeOffset(shakeTime: Float32): Game.Vec2 =
-        if (shakeTime <= 0.0f32) {x = 0.0f32, y = 0.0f32}
+    def shakeOffset(shakeTime: Float32): Vec2D.Vec2 =
+        if (shakeTime <= 0.0f32) Vec2D.zero()
         else {
-            let ox = sin32(shakeTime * 100.0f32) * shakeTime * 80.0f32;
-            let oy = cos32(shakeTime * 80.0f32) * shakeTime * 60.0f32;
+            let ox = Vec2D.sin32(shakeTime * 100.0f32) * shakeTime * 80.0f32;
+            let oy = Vec2D.cos32(shakeTime * 80.0f32) * shakeTime * 60.0f32;
             {x = ox, y = oy}
         }
 
