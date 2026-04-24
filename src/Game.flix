@@ -9,6 +9,13 @@ mod Game {
         case Ball
     }
 
+    pub enum Direction with Eq, ToString {
+        case Up
+        case Right
+        case Down
+        case Left
+    }
+
     pub type alias Vec2 = {x = Float32, y = Float32}
     pub type alias Vec3 = {r = Float32, g = Float32, b = Float32}
 
@@ -185,12 +192,13 @@ mod Game {
     // Game Logic — per-frame update
     // ========================================================================
 
-    /// 1フレームの更新を統合: 入力処理 → ボール移動 → リセット判定
+    /// 1フレームの更新を統合: 入力処理 → ボール移動 → 衝突処理 → リセット判定
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
         let s1 = processInput(state, dt);
         let s2 = moveBall(s1, dt);
-        checkBallReset(s2)
+        let s3 = doCollisions(s2);
+        checkBallReset(s3)
 
     /// パドル移動 + ボール発射
     pub def processInput(state: GameState, dt: Float32): GameState \ Game =
@@ -246,4 +254,120 @@ mod Game {
              ballVelocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
              ballStuck = true | state}
         } else state
+
+    // ========================================================================
+    // Collision Detection (LearnOpenGL Circle-AABB)
+    // ========================================================================
+
+    /// Newton法によるFloat32平方根
+    def sqrt32(v: Float32): Float32 =
+        if (v <= 0.0f32) 0.0f32
+        else newtonSqrt(v, v, 15)
+
+    @Tailrec
+    def newtonSqrt(v: Float32, x: Float32, n: Int32): Float32 =
+        if (n <= 0) x
+        else newtonSqrt(v, (x + v / x) / 2.0f32, n - 1)
+
+    /// 差分ベクトルが最も近いコンパス方向を返す
+    pub def vectorDirection(target: Vec2): Direction =
+        let dotUp    = target#y;
+        let dotRight = target#x;
+        let dotDown  = -1.0f32 * target#y;
+        let dotLeft  = -1.0f32 * target#x;
+        let (d0, v0) = (Direction.Up, dotUp);
+        let (d1, v1) = if (dotRight > v0) (Direction.Right, dotRight) else (d0, v0);
+        let (d2, v2) = if (dotDown > v1) (Direction.Down, dotDown) else (d1, v1);
+        let (d3, _)  = if (dotLeft > v2) (Direction.Left, dotLeft) else (d2, v2);
+        d3
+
+    /// Circle-AABB衝突判定: (衝突有無, 方向, 差分ベクトル) を返す
+    pub def checkCollisionCircleAABB(ballPos: Vec2, radius: Float32, box: GameObject): (Bool, Direction, Vec2) =
+        let ballCenter = {x = ballPos#x + radius, y = ballPos#y + radius};
+        let halfExtents = {x = box#size#x / 2.0f32, y = box#size#y / 2.0f32};
+        let aabbCenter = {x = box#position#x + halfExtents#x, y = box#position#y + halfExtents#y};
+        let diff = {x = ballCenter#x - aabbCenter#x, y = ballCenter#y - aabbCenter#y};
+        let clamped = {
+            x = Float32.max(-1.0f32 * halfExtents#x, Float32.min(halfExtents#x, diff#x)),
+            y = Float32.max(-1.0f32 * halfExtents#y, Float32.min(halfExtents#y, diff#y))
+        };
+        let closest = {x = aabbCenter#x + clamped#x, y = aabbCenter#y + clamped#y};
+        let difference = {x = closest#x - ballCenter#x, y = closest#y - ballCenter#y};
+        let distSq = difference#x * difference#x + difference#y * difference#y;
+        if (distSq < radius * radius)
+            (true, vectorDirection(difference), difference)
+        else
+            (false, Direction.Up, {x = 0.0f32, y = 0.0f32})
+
+    /// 全衝突処理: ブリック衝突 → パドル衝突
+    def doCollisions(state: GameState): GameState =
+        if (state#ballStuck) state
+        else {
+            let s1 = doBrickCollisions(state);
+            doPaddleCollision(s1)
+        }
+
+    /// ブリック衝突処理: 各ブリックとの衝突を検出し、破壊+ボール反射
+    def doBrickCollisions(state: GameState): GameState =
+        match List.nth(state#currentLevel, state#levels) {
+            case None => state
+            case Some(level) => {
+                let result = List.foldLeft(
+                    (acc, brick) -> {
+                        let (bricks, bPos, bVel) = acc;
+                        if (brick#destroyed)
+                            (brick :: bricks, bPos, bVel)
+                        else {
+                            let (collision, dir, diff) = checkCollisionCircleAABB(bPos, state#ballRadius, brick);
+                            if (not collision)
+                                (brick :: bricks, bPos, bVel)
+                            else {
+                                let newBrick = if (brick#isSolid) brick else {destroyed = true | brick};
+                                let horizontal = (dir == Direction.Left) or (dir == Direction.Right);
+                                if (horizontal) {
+                                    let newVx = -1.0f32 * bVel#x;
+                                    let penetration = state#ballRadius - Float32.abs(diff#x);
+                                    let newX = if (dir == Direction.Left) bPos#x + penetration else bPos#x - penetration;
+                                    (newBrick :: bricks, {x = newX, y = bPos#y}, {x = newVx, y = bVel#y})
+                                } else {
+                                    let newVy = -1.0f32 * bVel#y;
+                                    let penetration = state#ballRadius - Float32.abs(diff#y);
+                                    let newY = if (dir == Direction.Up) bPos#y - penetration else bPos#y + penetration;
+                                    (newBrick :: bricks, {x = bPos#x, y = newY}, {x = bVel#x, y = newVy})
+                                }
+                            }
+                        }
+                    },
+                    (Nil, state#ballPos, state#ballVelocity),
+                    level#bricks
+                );
+                let (newBricks, newBallPos, newBallVel) = result;
+                let fixedBricks = List.reverse(newBricks);
+                let newLevel = {bricks = fixedBricks};
+                let newLevels = state#levels |> List.zipWithIndex |> List.map(match (i, lvl) ->
+                    if (i == state#currentLevel) newLevel else lvl
+                );
+                {levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state}
+            }
+        }
+
+    /// パドル衝突処理: 打ち返し角度をヒット位置に基づき調整
+    def doPaddleCollision(state: GameState): GameState =
+        let (collision, _, _) = checkCollisionCircleAABB(state#ballPos, state#ballRadius, state#player);
+        if (not collision) state
+        else {
+            let centerBoard = state#player#position#x + state#player#size#x / 2.0f32;
+            let distance = (state#ballPos#x + state#ballRadius) - centerBoard;
+            let percentage = distance / (state#player#size#x / 2.0f32);
+            let strength = 2.0f32;
+            let oldVx = state#ballVelocity#x;
+            let oldVy = state#ballVelocity#y;
+            let speed = sqrt32(oldVx * oldVx + oldVy * oldVy);
+            let newVx = initialBallVelocityX() * percentage * strength;
+            let newVy = -1.0f32 * Float32.abs(state#ballVelocity#y);
+            let len = sqrt32(newVx * newVx + newVy * newVy);
+            let finalVx = if (len > 0.0f32) newVx / len * speed else newVx;
+            let finalVy = if (len > 0.0f32) newVy / len * speed else newVy;
+            {ballVelocity = {x = finalVx, y = finalVy} | state}
+        }
 }
