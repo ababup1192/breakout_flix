@@ -314,15 +314,12 @@ def parseLevel(data: String, levelWidth: Int32, levelHeight: Int32, textures: Te
     let rows = List.map(parseLevelLine, lines);
     let validRows = List.filter(row -> not List.isEmpty(row), rows);
     let numRows = List.length(validRows);
-    let numCols = match List.head(validRows) {
-        case Some(row) => List.length(row)
-        case None => 0
-    };
+    let numCols = List.head(validRows) |> Option.map(List.length) |> Option.getWithDefault(0);
 
     let unitWidth = if (numCols > 0) Int32.toFloat32(levelWidth) / Int32.toFloat32(numCols) else 0.0f32;
     let unitHeight = if (numRows > 0) Int32.toFloat32(levelHeight) / Int32.toFloat32(numRows) else 0.0f32;
 
-    let bricks = buildBricks(validRows, 0, unitWidth, unitHeight, textures);
+    let bricks = buildBricks(validRows, unitWidth, unitHeight, textures);
     {bricks = bricks}
 
 /// スペース区切りの1行をInt32のリストにパース
@@ -332,58 +329,46 @@ def parseLevel(data: String, levelWidth: Int32, levelHeight: Int32, textures: Te
 def parseLevelLine(line: String): List[Int32] =
     let trimmed = String.trim(line);
     if (String.isEmpty(trimmed)) Nil
-    else {
-        let tokens = String.split({regex = " "}, trimmed);
-        let nonEmpty = List.filter(s -> not String.isEmpty(String.trim(s)), tokens);
-        List.filterMap(s -> Int32.fromString(String.trim(s)), nonEmpty)
-    }
+    else
+        trimmed
+            |> String.split({regex = " "})
+            |> List.filterMap(s -> {
+                let t = String.trim(s);
+                if (String.isEmpty(t)) None else Int32.fromString(t)
+            })
 
-/// パース済み全行からブリックのGameObjectリストを再帰的に構築
+/// パース済み全行からブリックのGameObjectリストを構築
 ///
 /// - `rows`: パース済みの行リスト（各行はタイルタイプのリスト）
-/// - `rowIdx`: 現在処理中の行インデックス
 /// - `unitW`: 1ブリックあたりの幅
 /// - `unitH`: 1ブリックあたりの高さ
 /// - `textures`: テクスチャID群
 /// - 戻り値: 全行分の `GameObject` リスト
-def buildBricks(rows: List[List[Int32]], rowIdx: Int32, unitW: Float32, unitH: Float32, textures: Textures): List[GameObject] =
-    match rows {
-        case row :: rest =>
-            let rowBricks = buildBrickRow(row, 0, rowIdx, unitW, unitH, textures);
-            let restBricks = buildBricks(rest, rowIdx + 1, unitW, unitH, textures);
-            List.append(rowBricks, restBricks)
-        case Nil => Nil
-    }
+def buildBricks(rows: List[List[Int32]], unitW: Float32, unitH: Float32, textures: Textures): List[GameObject] =
+    rows |> (List.zipWithIndex >> List.flatMap(match (rowIdx, row) -> 
+        buildBrickRow(row, rowIdx, unitW, unitH, textures)
+    ))
 
 /// 1行分のタイルタイプ列からブリックを生成。タイプ0はスキップ、1はsolid
 ///
 /// - `row`: 1行分のタイルタイプリスト
-/// - `colIdx`: 現在の列インデックス
 /// - `rowIdx`: 行インデックス
 /// - `unitW`: 1ブリックあたりの幅
 /// - `unitH`: 1ブリックあたりの高さ
 /// - `textures`: テクスチャID群
 /// - 戻り値: 1行分の `GameObject` リスト
-def buildBrickRow(row: List[Int32], colIdx: Int32, rowIdx: Int32, unitW: Float32, unitH: Float32, textures: Textures): List[GameObject] =
-    match row {
-        case tileType :: rest =>
-            let restBricks = buildBrickRow(rest, colIdx + 1, rowIdx, unitW, unitH, textures);
-            if (tileType == 0) restBricks
-            else {
-                let texId = if (tileType == 1) textures#blockSolid else textures#block;
-                let yPos = Int32.toFloat32(rowIdx) * unitH;
-                let brick = {
-                    position = {x = Int32.toFloat32(colIdx) * unitW, y = yPos},
-                    size = {x = unitW, y = unitH},
-                    color = tileColor(tileType),
-                    isSolid = (tileType == 1),
-                    destroyed = false,
-                    textureId = texId
-                };
-                brick :: restBricks
-            }
-        case Nil => Nil
-    }
+def buildBrickRow(row: List[Int32], rowIdx: Int32, unitW: Float32, unitH: Float32, textures: Textures): List[GameObject] =
+    row |> (List.zipWithIndex >> List.filterMap(match (colIdx, tileType) ->
+        if (tileType == 0) None
+        else Some({
+            position = {x = Int32.toFloat32(colIdx) * unitW, y = Int32.toFloat32(rowIdx) * unitH},
+            size = {x = unitW, y = unitH},
+            color = tileColor(tileType),
+            isSolid = (tileType == 1),
+            destroyed = false,
+            textureId = if (tileType == 1) textures#blockSolid else textures#block
+        })
+    ))
 
 /// タイルタイプ(1-5)をLearnOpenGLの配色に対応するRGB色に変換
 ///
@@ -477,14 +462,11 @@ def render(state: GameState, textures: Textures, shader: Int32, vao: Int32): Uni
 /// - `shader`: シェーダープログラムID
 /// - `vao`: 頂点配列オブジェクトID
 def drawBricks(bricks: List[GameObject], shader: Int32, vao: Int32): Unit \ IO =
-    match bricks {
-        case brick :: rest =>
-            if (not brick#destroyed) {
-                drawSprite(shader, brick#textureId, vao, brick#position, brick#size, brick#color)
-            } else ();
-            drawBricks(rest, shader, vao)
-        case Nil => ()
-    }
+    List.forEach(brick -> {
+        if (not brick#destroyed) {
+            drawSprite(shader, brick#textureId, vao, brick#position, brick#size, brick#color)
+        } else ()
+    }, bricks)
 
 // ============================================================================
 // Main Entry Point
