@@ -1,62 +1,97 @@
-// Scene builder: converts GameState to SceneTree for rendering
+// BreakoutScene — scene construction and rendering effects
 
 mod BreakoutScene {
-    def white(): Game.Vec3 = {r = 1.0f32, g = 1.0f32, b = 1.0f32}
+    // ========================================================================
+    // Scene Building
+    // ========================================================================
+
+    pub def buildBrickSubtree(level: Game.LevelData): SceneTree.Node =
+        let brickNodes = level#bricks |> List.zipWithIndex |> List.map(match (idx, brick) ->
+            let idxStr = Int32.toString(idx);
+            SceneTree.Node.StaticBody2D(
+                "Brick_${idxStr}",
+                {position = brick#position, scale = Vec2D.one()},
+                {isSolid = brick#isSolid, destroyed = false},
+                SceneTree.Node.Sprite2D(
+                    "BrickSprite_${idxStr}",
+                    SceneTree.identityTransform(),
+                    {size = brick#size, color = brick#color, texture = brick#texture, visible = true}
+                ) ::
+                SceneTree.Node.CollisionShape2D(
+                    "BrickCollider_${idxStr}",
+                    SceneTree.CollisionShapeData.RectShape(brick#size)
+                ) :: Nil
+            )
+        );
+        SceneTree.Node.Node2D("Bricks", SceneTree.identityTransform(), brickNodes)
+
+    pub def buildInitialScene(width: Int32, height: Int32, level: Game.LevelData): SceneTree.Node =
+        let sw = Int32.toFloat32(width);
+        let sh = Int32.toFloat32(height);
+        let playerX = sw / 2.0f32 - Game.playerWidth() / 2.0f32;
+        let playerY = sh - Game.playerHeight();
+        let ballX = playerX + Game.playerWidth() / 2.0f32 - Game.ballRadiusConst();
+        let ballY = playerY - Game.ballRadiusConst() * 2.0f32;
+        let ballDiam = Game.ballRadiusConst() * 2.0f32;
+
+        SceneTree.Node.Node2D("Root", SceneTree.identityTransform(),
+            SceneTree.Node.Sprite2D("Background",
+                SceneTree.identityTransform(),
+                {size = {x = sw, y = sh}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "background", visible = true}
+            ) ::
+            buildBrickSubtree(level)
+            ::
+            SceneTree.Node.KinematicBody2D("Paddle",
+                {position = {x = playerX, y = playerY}, scale = Vec2D.one()},
+                {velocity = Vec2D.zero()},
+                SceneTree.Node.Sprite2D("PaddleSprite",
+                    SceneTree.identityTransform(),
+                    {size = {x = Game.playerWidth(), y = Game.playerHeight()}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "paddle", visible = true}
+                ) ::
+                SceneTree.Node.CollisionShape2D("PaddleCollider",
+                    SceneTree.CollisionShapeData.RectShape({x = Game.playerWidth(), y = Game.playerHeight()})
+                ) :: Nil
+            )
+            ::
+            SceneTree.Node.RigidBody2D("Ball",
+                {position = {x = ballX, y = ballY}, scale = Vec2D.one()},
+                {velocity = {x = Game.initialBallVelocityX(), y = Game.initialBallVelocityY()}, stuck = true},
+                SceneTree.Node.Sprite2D("BallSprite",
+                    SceneTree.identityTransform(),
+                    {size = {x = ballDiam, y = ballDiam}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "ball", visible = true}
+                ) ::
+                SceneTree.Node.CollisionShape2D("BallCollider",
+                    SceneTree.CollisionShapeData.CircleShape(Game.ballRadiusConst())
+                ) :: Nil
+            )
+            ::
+            SceneTree.Node.Area2D("DeathZone",
+                {position = {x = 0.0f32, y = sh}, scale = Vec2D.one()},
+                SceneTree.Node.CollisionShape2D("DeathZoneShape",
+                    SceneTree.CollisionShapeData.RectShape({x = sw, y = 20.0f32})
+                ) :: Nil
+            )
+            :: Nil
+        )
+
+    // ========================================================================
+    // Rendering: apply shake offset
+    // ========================================================================
+
+    pub def applyShake(state: Game.GameState): SceneTree.Node =
+        let shake = shakeOffset(state#shakeTime);
+        SceneTree.setNodePosition("Root", shake, state#scene)
+
+    // ========================================================================
+    // Shake calculation
+    // ========================================================================
 
     /// shakeTime > 0 のとき sin/cos でオフセットを生成
-    def shakeOffset(shakeTime: Float32): Vec2D.Vec2 =
+    pub def shakeOffset(shakeTime: Float32): Vec2D.Vec2 =
         if (shakeTime <= 0.0f32) Vec2D.zero()
         else {
             let ox = Vec2D.sin32(shakeTime * 100.0f32) * shakeTime * 80.0f32;
             let oy = Vec2D.cos32(shakeTime * 80.0f32) * shakeTime * 60.0f32;
             {x = ox, y = oy}
-        }
-
-    /// GameState → rendering scene tree
-    pub def toScene(state: Game.GameState): SceneTree.Node =
-        let sw = Int32.toFloat32(Game.screenWidth());
-        let sh = Int32.toFloat32(Game.screenHeight());
-        let levelOpt = List.nth(state#currentLevel, state#levels);
-
-        let shake = shakeOffset(state#shakeTime);
-        SceneTree.Node.Group("Root", {position = shake, scale = {x = 1.0f32, y = 1.0f32}},
-            SceneTree.Node.Sprite("Background",
-                SceneTree.identityTransform(),
-                {size = {x = sw, y = sh}, color = white(), texture = "background", visible = true},
-                Nil)
-            ::
-            buildBrickSprites(levelOpt)
-            ::
-            SceneTree.Node.Sprite("Paddle",
-                {position = state#player#position, scale = {x = 1.0f32, y = 1.0f32}},
-                {size = state#player#size, color = state#player#color,
-                 texture = state#player#texture, visible = true},
-                Nil)
-            ::
-            SceneTree.Node.Sprite("Ball",
-                {position = state#ballPos, scale = {x = 1.0f32, y = 1.0f32}},
-                {size = {x = state#ballRadius * 2.0f32, y = state#ballRadius * 2.0f32},
-                 color = white(), texture = "ball", visible = true},
-                Nil)
-            :: Nil
-        )
-
-    /// Convert level bricks to a Group node containing Sprite nodes
-    def buildBrickSprites(levelOpt: Option[Game.GameLevel]): SceneTree.Node =
-        match levelOpt {
-            case None => SceneTree.Node.Group("Bricks", SceneTree.identityTransform(), Nil)
-            case Some(level) =>
-                let sprites = List.filterMap(brick ->
-                    if (brick#destroyed) None
-                    else Some(
-                        SceneTree.Node.Sprite("Brick",
-                            {position = brick#position, scale = {x = 1.0f32, y = 1.0f32}},
-                            {size = brick#size, color = brick#color,
-                             texture = brick#texture, visible = true},
-                            Nil)
-                    ),
-                    level#bricks
-                );
-                SceneTree.Node.Group("Bricks", SceneTree.identityTransform(), sprites)
         }
 }

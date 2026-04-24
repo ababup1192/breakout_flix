@@ -1,13 +1,6 @@
 // Game module — types, effects, constants, level parsing, and game logic
 
 mod Game {
-    pub enum Direction with Eq, ToString {
-        case Up
-        case Right
-        case Down
-        case Left
-    }
-
     pub enum GameEvent with Eq, ToString {
         case BrickDestroyed(Int32)
         case PaddleHit
@@ -18,31 +11,26 @@ mod Game {
 
     pub type alias Vec3 = {r = Float32, g = Float32, b = Float32}
 
-    pub type alias GameObject = {
+    pub type alias BrickTemplate = {
         position = Vec2D.Vec2,
         size = Vec2D.Vec2,
         color = Vec3,
         isSolid = Bool,
-        destroyed = Bool,
         texture = String
     }
 
-    pub type alias GameLevel = {
-        bricks = List[GameObject]
+    pub type alias LevelData = {
+        bricks = List[BrickTemplate]
     }
 
     pub type alias GameState = {
-        levels = List[GameLevel],
+        scene = SceneTree.Node,
+        levels = List[LevelData],
         currentLevel = Int32,
-        player = GameObject,
-        ballPos = Vec2D.Vec2,
-        ballVelocity = Vec2D.Vec2,
-        ballRadius = Float32,
-        ballStuck = Bool,
         shakeTime = Float32
     }
 
-    type alias BrickFoldAcc = (List[GameObject], Vec2D.Vec2, Vec2D.Vec2, List[GameEvent], Int32)
+    type alias BrickFoldAcc = (List[(String, SceneTree.Node)], Vec2D.Vec2, Vec2D.Vec2, List[GameEvent], Int32)
 
     pub type alias TextureRegistry = Map[String, Int32]
 
@@ -55,7 +43,7 @@ mod Game {
     }
 
     // ========================================================================
-    // Constants (from LearnOpenGL tutorial)
+    // Constants
     // ========================================================================
 
     pub def screenWidth(): Int32 = 800
@@ -72,10 +60,9 @@ mod Game {
     pub def keySpace(): Int32 = 32
 
     // ========================================================================
-    // Texture Manifest (data-driven texture registration)
+    // Texture Manifest
     // ========================================================================
 
-    /// (name, path, hasAlpha) — add a line here for new textures
     pub def textureManifest(): List[(String, String, Bool)] =
         ("background", "textures/background.jpg", false) ::
         ("block",      "textures/block.png",      true) ::
@@ -88,15 +75,13 @@ mod Game {
     // Level Parsing
     // ========================================================================
 
-    /// .lvlファイルを読み込み、レベルデータをパースして GameLevel を返す
-    def loadLevel(path: String, levelWidth: Int32, levelHeight: Int32): GameLevel \ Fs.FileRead =
+    def loadLevel(path: String, levelWidth: Int32, levelHeight: Int32): LevelData \ Fs.FileRead =
         match Fs.FileRead.read(path) {
             case Ok(data) => parseLevel(data, levelWidth, levelHeight)
             case Err(_) => bug!("Failed to load level: ${path}")
         }
 
-    /// レベルデータ文字列をパースし、ブリックのGameObjectリストに変換
-    pub def parseLevel(data: String, levelWidth: Int32, levelHeight: Int32): GameLevel =
+    pub def parseLevel(data: String, levelWidth: Int32, levelHeight: Int32): LevelData =
         let validRows = data
             |> String.split({regex = "\n"})
             |> List.map(parseLevelLine)
@@ -110,7 +95,6 @@ mod Game {
         let bricks = buildBricks(validRows, unitWidth, unitHeight);
         {bricks = bricks}
 
-    /// スペース区切りの1行をInt32のリストにパース
     pub def parseLevelLine(line: String): List[Int32] =
         let trimmed = String.trim(line);
         if (String.isEmpty(trimmed)) Nil
@@ -122,14 +106,12 @@ mod Game {
                     if (String.isEmpty(t)) None else Int32.fromString(t)
                 })
 
-    /// パース済み全行からブリックのGameObjectリストを構築
-    def buildBricks(rows: List[List[Int32]], unitW: Float32, unitH: Float32): List[GameObject] =
+    def buildBricks(rows: List[List[Int32]], unitW: Float32, unitH: Float32): List[BrickTemplate] =
         rows |> (List.zipWithIndex >> List.flatMap(match (rowIdx, row) ->
             buildBrickRow(row, rowIdx, unitW, unitH)
         ))
 
-    /// 1行分のタイルタイプ列からブリックを生成。タイプ0はスキップ、1はsolid
-    def buildBrickRow(row: List[Int32], rowIdx: Int32, unitW: Float32, unitH: Float32): List[GameObject] =
+    def buildBrickRow(row: List[Int32], rowIdx: Int32, unitW: Float32, unitH: Float32): List[BrickTemplate] =
         row |> (List.zipWithIndex >> List.filterMap(match (colIdx, tileType) ->
             if (tileType == 0) None
             else Some({
@@ -137,56 +119,35 @@ mod Game {
                 size = {x = unitW, y = unitH},
                 color = tileColor(tileType),
                 isSolid = (tileType == 1),
-                destroyed = false,
                 texture = if (tileType == 1) "block_solid" else "block"
             })
         ))
 
-    /// タイルタイプ(1-5)をLearnOpenGLの配色に対応するRGB色に変換
     def tileColor(tileType: Int32): Vec3 =
         match tileType {
-            case 1 => {r = 0.8f32, g = 0.8f32, b = 0.7f32}  // Solid - tan/gray
-            case 2 => {r = 0.2f32, g = 0.6f32, b = 1.0f32}  // Blue
-            case 3 => {r = 0.0f32, g = 0.7f32, b = 0.0f32}  // Green
-            case 4 => {r = 0.8f32, g = 0.8f32, b = 0.4f32}  // Yellow
-            case 5 => {r = 1.0f32, g = 0.5f32, b = 0.0f32}  // Orange
-            case _ => {r = 1.0f32, g = 1.0f32, b = 1.0f32}  // White
+            case 1 => {r = 0.8f32, g = 0.8f32, b = 0.7f32}
+            case 2 => {r = 0.2f32, g = 0.6f32, b = 1.0f32}
+            case 3 => {r = 0.0f32, g = 0.7f32, b = 0.0f32}
+            case 4 => {r = 0.8f32, g = 0.8f32, b = 0.4f32}
+            case 5 => {r = 1.0f32, g = 0.5f32, b = 0.0f32}
+            case _ => {r = 1.0f32, g = 1.0f32, b = 1.0f32}
         }
 
     // ========================================================================
     // Game Initialization
     // ========================================================================
 
-    /// 4レベル・プレイヤー・ボールの初期状態を構築して GameState を返す
     pub def initGame(width: Int32, height: Int32): GameState \ Fs.FileRead =
         let level1 = loadLevel("levels/one.lvl", width, height / 2);
         let level2 = loadLevel("levels/two.lvl", width, height / 2);
         let level3 = loadLevel("levels/three.lvl", width, height / 2);
         let level4 = loadLevel("levels/four.lvl", width, height / 2);
-
-        let playerX = Int32.toFloat32(width) / 2.0f32 - playerWidth() / 2.0f32;
-        let playerY = Int32.toFloat32(height) - playerHeight();
-
-        let player = {
-            position = {x = playerX, y = playerY},
-            size = {x = playerWidth(), y = playerHeight()},
-            color = {r = 1.0f32, g = 1.0f32, b = 1.0f32},
-            isSolid = true,
-            destroyed = false,
-            texture = "paddle"
-        };
-
-        let ballX = playerX + playerWidth() / 2.0f32 - ballRadiusConst();
-        let ballY = playerY - ballRadiusConst() * 2.0f32;
-
+        let levels = level1 :: level2 :: level3 :: level4 :: Nil;
+        let scene = BreakoutScene.buildInitialScene(width, height, level1);
         {
-            levels = level1 :: level2 :: level3 :: level4 :: Nil,
+            scene = scene,
+            levels = levels,
             currentLevel = 0,
-            player = player,
-            ballPos = {x = ballX, y = ballY},
-            ballVelocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
-            ballRadius = ballRadiusConst(),
-            ballStuck = true,
             shakeTime = 0.0f32
         }
 
@@ -203,7 +164,8 @@ mod Game {
         if (Game.shouldClose()) state
         else {
             let newState = updateGame(state);
-            Game.render(BreakoutScene.toScene(newState));
+            let renderScene = BreakoutScene.applyShake(newState);
+            Game.render(renderScene);
             runLoop(newState)
         }
 
@@ -211,196 +173,170 @@ mod Game {
     // Game Logic — per-frame update
     // ========================================================================
 
-    /// 1フレームの更新を統合: 入力処理 → ボール移動 → 衝突処理 → リセット判定 → シェイク減衰
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
-        let (finalState, allEvents) = GameAction.unpack(forM (
-            s1 <- processInput(state, dt);
-            s2 <- doCollisions(moveBall(s1, dt));
-            s3 <- checkBallReset(s2)
-        ) yield s3);
-        tickShake(handleEvents(finalState, allEvents), dt)
+        let screenSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())};
+        let s1 = processInput(state);
+        let s2 = {scene = SceneTree.physicsStep(s1#scene, dt, screenSize) | s1};
+        let (s3, allEvents) = GameAction.unpack(forM (
+            sa <- doBrickCollisions(s2);
+            sb <- doPaddleCollision(sa);
+            sc <- checkDeathZone(sb)
+        ) yield sc);
+        tickShake(handleEvents(s3, allEvents), dt)
 
-    /// イベントハンドラ: SolidBrickHitでシェイクを開始
     pub def handleEvents(state: GameState, events: List[GameEvent]): GameState =
         List.foldLeft((s, event) -> match event {
             case GameEvent.SolidBrickHit => {shakeTime = 0.15f32 | s}
             case _ => s
         }, state, events)
 
-    /// シェイクタイマーを減衰（毎フレーム呼ぶ）
     pub def tickShake(state: GameState, dt: Float32): GameState =
         if (state#shakeTime > 0.0f32)
             {shakeTime = Float32.max(0.0f32, state#shakeTime - dt) | state}
         else state
 
-    /// パドルを dx だけ移動（ボールが貼り付いていればボールも追従）
-    def movePlayer(state: GameState, dx: Float32): GameState =
-        let sw = Int32.toFloat32(screenWidth());
-        let rawX = state#player#position#x + dx;
-        let newX = Float32.max(0.0f32, Float32.min(sw - playerWidth(), rawX));
-        let newPlayer = {position = {x = newX, y = state#player#position#y} | state#player};
-        let s = {player = newPlayer | state};
-        if (s#ballStuck) {
-            let bx = newX + playerWidth() / 2.0f32 - ballRadiusConst();
-            {ballPos = {x = bx, y = s#ballPos#y} | s}
-        } else s
+    // ========================================================================
+    // Input Processing
+    // ========================================================================
 
-    /// パドル移動 + ボール発射
-    pub def processInput(state: GameState, dt: Float32): GameAction.GameAction[GameState] \ Game =
-        let s1 = if (Game.isKeyPressed(keyA()))
-                     movePlayer(state, -1.0f32 * playerVelocity() * dt)
-                 else state;
-        let s2 = if (Game.isKeyPressed(keyD()))
-                     movePlayer(s1, playerVelocity() * dt)
-                 else s1;
+    pub def processInput(state: GameState): GameState \ Game =
+        let velLeft = if (Game.isKeyPressed(keyA())) -1.0f32 * playerVelocity() else 0.0f32;
+        let velRight = if (Game.isKeyPressed(keyD())) playerVelocity() else 0.0f32;
+        let paddleVelX = velLeft + velRight;
+        let s1 = {scene = SceneTree.updateKinematicBody("Paddle",
+            _ -> {velocity = {x = paddleVelX, y = 0.0f32}},
+            state#scene) | state};
         if (Game.isKeyPressed(keySpace())) {
-            let events = if (s2#ballStuck) GameEvent.BallLaunched :: Nil else Nil;
-            GameAction.of({ballStuck = false | s2}, events)
-        } else GameAction.pure(s2)
+            {scene = SceneTree.updateRigidBody("Ball",
+                bd -> {stuck = false | bd},
+                s1#scene) | s1}
+        } else s1
 
-    /// ボール物理: 移動 + 壁反射（純粋関数）
-    pub def moveBall(state: GameState, dt: Float32): GameState =
-        if (state#ballStuck) state
+    // ========================================================================
+    // Helpers to extract ball state
+    // ========================================================================
+
+    pub def getBallPos(state: GameState): Vec2D.Vec2 =
+        SceneTree.findNode("Ball", state#scene)
+            |> Option.map(n -> (SceneTree.nodeTransform(n))#position)
+            |> Option.getWithDefault(Vec2D.zero())
+
+    pub def getBallVel(state: GameState): Vec2D.Vec2 =
+        SceneTree.findNode("Ball", state#scene)
+            |> Option.flatMap(SceneTree.rigidBodyData)
+            |> Option.map(bd -> bd#velocity)
+            |> Option.getWithDefault(Vec2D.zero())
+
+    pub def getBallRadius(state: GameState): Float32 =
+        SceneTree.findNode("Ball", state#scene)
+            |> Option.flatMap(n -> SceneTree.findCircleShape(SceneTree.nodeChildren(n)))
+            |> Option.getWithDefault(ballRadiusConst())
+
+    pub def isBallStuck(state: GameState): Bool =
+        SceneTree.findNode("Ball", state#scene)
+            |> Option.flatMap(SceneTree.rigidBodyData)
+            |> Option.map(bd -> bd#stuck)
+            |> Option.getWithDefault(true)
+
+    pub def getPaddlePos(state: GameState): Vec2D.Vec2 =
+        SceneTree.findNode("Paddle", state#scene)
+            |> Option.map(n -> (SceneTree.nodeTransform(n))#position)
+            |> Option.getWithDefault(Vec2D.zero())
+
+    def getPaddleSize(state: GameState): Vec2D.Vec2 =
+        SceneTree.findNode("Paddle", state#scene)
+            |> Option.flatMap(n -> SceneTree.findRectShape(SceneTree.nodeChildren(n)))
+            |> Option.getWithDefault({x = playerWidth(), y = playerHeight()})
+
+    // ========================================================================
+    // Collision: Bricks
+    // ========================================================================
+
+    def doBrickCollisions(state: GameState): GameAction.GameAction[GameState] =
+        if (isBallStuck(state)) GameAction.pure(state)
         else {
-            let sw = Int32.toFloat32(screenWidth());
-            let ballSize = state#ballRadius * 2.0f32;
-            let newX = state#ballPos#x + state#ballVelocity#x * dt;
-            let newY = state#ballPos#y + state#ballVelocity#y * dt;
-            let vx0 = state#ballVelocity#x;
-            let vy0 = state#ballVelocity#y;
-            // 左壁
-            let (nx1, vx1) = if (newX <= 0.0f32) (0.0f32, Float32.abs(vx0)) else (newX, vx0);
-            // 右壁
-            let (nx2, vx2) = if (nx1 + ballSize >= sw) (sw - ballSize, -1.0f32 * Float32.abs(vx1)) else (nx1, vx1);
-            // 上壁
-            let (ny1, vy1) = if (newY <= 0.0f32) (0.0f32, Float32.abs(vy0)) else (newY, vy0);
-            {ballPos = {x = nx2, y = ny1}, ballVelocity = {x = vx2, y = vy1} | state}
+            let ballPos = getBallPos(state);
+            let ballVel = getBallVel(state);
+            let radius = getBallRadius(state);
+            let brickNodes = SceneTree.findNode("Bricks", state#scene)
+                |> Option.map(SceneTree.nodeChildren)
+                |> Option.getWithDefault(Nil);
+            let init: BrickFoldAcc = (Nil, ballPos, ballVel, Nil, 0);
+            let (updatedBricks, newBallPos, newBallVel, events, _) =
+                List.foldLeft((acc, brickNode) -> brickCollisionStep(radius, acc, brickNode), init, brickNodes);
+            let newBricksNode = SceneTree.Node.Node2D("Bricks", SceneTree.identityTransform(), List.reverse(updatedBricks) |> List.map(match (_, n) -> n));
+            let scene1 = SceneTree.mapNode("Bricks", _ -> newBricksNode, state#scene);
+            let scene2 = SceneTree.updateRigidBody("Ball", bd -> {velocity = newBallVel | bd},
+                SceneTree.setNodePosition("Ball", newBallPos, scene1));
+            GameAction.of({scene = scene2 | state}, List.reverse(events))
         }
 
-    /// 画面下に落ちたらリセット（BallResetイベントを発火）
-    pub def checkBallReset(state: GameState): GameAction.GameAction[GameState] =
-        let sh = Int32.toFloat32(screenHeight());
-        if (state#ballPos#y >= sh) {
-            let px = state#player#position#x + playerWidth() / 2.0f32 - state#ballRadius;
-            let py = state#player#position#y - state#ballRadius * 2.0f32;
-            GameAction.of(
-                {ballPos = {x = px, y = py},
-                 ballVelocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
-                 ballStuck = true | state},
-                GameEvent.BallReset :: Nil)
-        } else GameAction.pure(state)
-
-    // ========================================================================
-    // Collision Detection (LearnOpenGL Circle-AABB)
-    // ========================================================================
-
-    /// 差分ベクトルが最も近いコンパス方向を返す
-    pub def vectorDirection(target: Vec2D.Vec2): Direction =
-        let dotUp    = target#y;
-        let dotRight = target#x;
-        let dotDown  = -1.0f32 * target#y;
-        let dotLeft  = -1.0f32 * target#x;
-        let (d0, v0) = (Direction.Up, dotUp);
-        let (d1, v1) = if (dotRight > v0) (Direction.Right, dotRight) else (d0, v0);
-        let (d2, v2) = if (dotDown > v1) (Direction.Down, dotDown) else (d1, v1);
-        let (d3, _)  = if (dotLeft > v2) (Direction.Left, dotLeft) else (d2, v2);
-        d3
-
-    /// Circle-AABB衝突判定: (衝突有無, 方向, 差分ベクトル) を返す
-    pub def checkCollisionCircleAABB(ballPos: Vec2D.Vec2, radius: Float32, box: GameObject): (Bool, Direction, Vec2D.Vec2) =
-        let ballCenter = Vec2D.add(ballPos, {x = radius, y = radius});
-        let halfExtents = Vec2D.div(box#size, 2.0f32);
-        let aabbCenter = Vec2D.add(box#position, halfExtents);
-        let diff = Vec2D.sub(ballCenter, aabbCenter);
-        let clamped = Vec2D.clampSymmetric(diff, halfExtents);
-        let closest = Vec2D.add(aabbCenter, clamped);
-        let difference = Vec2D.sub(closest, ballCenter);
-        let distSq = Vec2D.lengthSquared(difference);
-        if (distSq < radius * radius)
-            (true, vectorDirection(difference), difference)
-        else
-            (false, Direction.Up, Vec2D.zero())
-
-    /// ボールの反射処理: 衝突方向に応じて位置と速度を補正
-    def reflectBall(bPos: Vec2D.Vec2, bVel: Vec2D.Vec2, radius: Float32, dir: Direction, diff: Vec2D.Vec2): (Vec2D.Vec2, Vec2D.Vec2) =
-        let horizontal = (dir == Direction.Left) or (dir == Direction.Right);
-        if (horizontal) {
-            let penetration = radius - Float32.abs(diff#x);
-            let newX = if (dir == Direction.Left) bPos#x + penetration else bPos#x - penetration;
-            ({x = newX, y = bPos#y}, {x = -1.0f32 * bVel#x, y = bVel#y})
-        } else {
-            let penetration = radius - Float32.abs(diff#y);
-            let newY = if (dir == Direction.Up) bPos#y - penetration else bPos#y + penetration;
-            ({x = bPos#x, y = newY}, {x = bVel#x, y = -1.0f32 * bVel#y})
-        }
-
-    /// 1ブリックとの衝突判定・反射を fold のステップとして実行
-    def brickCollisionStep(radius: Float32, acc: BrickFoldAcc, brick: GameObject): BrickFoldAcc =
+    def brickCollisionStep(radius: Float32, acc: BrickFoldAcc, brickNode: SceneTree.Node): BrickFoldAcc =
         let (bricks, bPos, bVel, events, idx) = acc;
-        if (brick#destroyed)
-            (brick :: bricks, bPos, bVel, events, idx + 1)
+        let brickName = SceneTree.nodeName(brickNode);
+        match brickNode {
+            case SceneTree.Node.StaticBody2D(name, transform, bodyData, children) =>
+                if (bodyData#destroyed) {
+                    ((brickName, brickNode) :: bricks, bPos, bVel, events, idx + 1)
+                } else {
+                    let brickPos = transform#position;
+                    let brickSize = SceneTree.findRectShape(children) |> Option.getWithDefault(Vec2D.zero());
+                    match SceneTree.checkCircleRect(bPos, radius, brickPos, brickSize) {
+                        case None =>
+                            ((brickName, brickNode) :: bricks, bPos, bVel, events, idx + 1)
+                        case Some((dir, diff)) =>
+                            let newBodyData = if (bodyData#isSolid) bodyData else {destroyed = true | bodyData};
+                            let newBrick = SceneTree.Node.StaticBody2D(name, transform, newBodyData, children);
+                            let newEvents = if (bodyData#isSolid) GameEvent.SolidBrickHit :: events
+                                            else GameEvent.BrickDestroyed(idx) :: events;
+                            let (newPos, newVel) = SceneTree.resolveCollision(bPos, bVel, radius, dir, diff);
+                            ((brickName, newBrick) :: bricks, newPos, newVel, newEvents, idx + 1)
+                    }
+                }
+            case _ => ((brickName, brickNode) :: bricks, bPos, bVel, events, idx + 1)
+        }
+
+    // ========================================================================
+    // Collision: Paddle
+    // ========================================================================
+
+    def doPaddleCollision(state: GameState): GameAction.GameAction[GameState] =
+        if (isBallStuck(state)) GameAction.pure(state)
         else {
-            let (collision, dir, diff) = checkCollisionCircleAABB(bPos, radius, brick);
-            if (not collision)
-                (brick :: bricks, bPos, bVel, events, idx + 1)
-            else {
-                let newBrick = if (brick#isSolid) brick else {destroyed = true | brick};
-                let newEvents = if (brick#isSolid) GameEvent.SolidBrickHit :: events
-                                else GameEvent.BrickDestroyed(idx) :: events;
-                let (newPos, newVel) = reflectBall(bPos, bVel, radius, dir, diff);
-                (newBrick :: bricks, newPos, newVel, newEvents, idx + 1)
+            let ballPos = getBallPos(state);
+            let ballVel = getBallVel(state);
+            let radius = getBallRadius(state);
+            let paddlePos = getPaddlePos(state);
+            let paddleSize = getPaddleSize(state);
+            match SceneTree.checkCircleRect(ballPos, radius, paddlePos, paddleSize) {
+                case None => GameAction.pure(state)
+                case Some(_) =>
+                    let centerBoard = paddlePos#x + paddleSize#x / 2.0f32;
+                    let distance = (ballPos#x + radius) - centerBoard;
+                    let percentage = distance / (paddleSize#x / 2.0f32);
+                    let strength = 2.0f32;
+                    let speed = Vec2D.length(ballVel);
+                    let newVx = initialBallVelocityX() * percentage * strength;
+                    let newVy = -1.0f32 * Float32.abs(ballVel#y);
+                    let newVel = Vec2D.mul(Vec2D.normalized({x = newVx, y = newVy}), speed);
+                    let scene1 = SceneTree.updateRigidBody("Ball",
+                        bd -> {velocity = newVel | bd}, state#scene);
+                    GameAction.of({scene = scene1 | state}, GameEvent.PaddleHit :: Nil)
             }
         }
 
-    /// レベルリスト中の指定インデックスのブリックを差し替え
-    def updateLevelBricks(levels: List[GameLevel], levelIdx: Int32, newBricks: List[GameObject]): List[GameLevel] =
-        let newLevel = {bricks = newBricks};
-        levels |> List.zipWithIndex |> List.map(match (i, lvl) ->
-            if (i == levelIdx) newLevel else lvl
-        )
+    // ========================================================================
+    // Death Zone Check
+    // ========================================================================
 
-    /// 全衝突処理: ブリック衝突 → パドル衝突（イベント付き）
-    def doCollisions(state: GameState): GameAction.GameAction[GameState] =
-        if (state#ballStuck) GameAction.pure(state)
-        else {
-            forM (
-                s1 <- doBrickCollisions(state);
-                s2 <- doPaddleCollision(s1)
-            ) yield s2
-        }
-
-    /// ブリック衝突処理: 各ブリックとの衝突を検出し、破壊+ボール反射
-    def doBrickCollisions(state: GameState): GameAction.GameAction[GameState] =
-        let processLevel = level -> {
-            let init: BrickFoldAcc = (Nil, state#ballPos, state#ballVelocity, Nil, 0);
-            let (newBricks, newBallPos, newBallVel, events, _) =
-                List.foldLeft(brickCollisionStep(state#ballRadius), init, level#bricks);
-            let newLevels = updateLevelBricks(state#levels, state#currentLevel, List.reverse(newBricks));
-            GameAction.of(
-                {levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state},
-                List.reverse(events))
-        };
-        List.nth(state#currentLevel, state#levels)
-            |> Option.map(processLevel)
-            |> Option.getWithDefault(GameAction.pure(state))
-
-    /// パドル衝突処理: 打ち返し角度をヒット位置に基づき調整
-    def doPaddleCollision(state: GameState): GameAction.GameAction[GameState] =
-        let (collision, _, _) = checkCollisionCircleAABB(state#ballPos, state#ballRadius, state#player);
-        if (not collision) GameAction.pure(state)
-        else {
-            let centerBoard = state#player#position#x + state#player#size#x / 2.0f32;
-            let distance = (state#ballPos#x + state#ballRadius) - centerBoard;
-            let percentage = distance / (state#player#size#x / 2.0f32);
-            let strength = 2.0f32;
-            let speed = Vec2D.length(state#ballVelocity);
-            let newVx = initialBallVelocityX() * percentage * strength;
-            let newVy = -1.0f32 * Float32.abs(state#ballVelocity#y);
-            let newVel = Vec2D.normalized({x = newVx, y = newVy});
-            let finalVel = Vec2D.mul(newVel, speed);
-            GameAction.of(
-                {ballVelocity = finalVel | state},
-                GameEvent.PaddleHit :: Nil)
-        }
+    def checkDeathZone(state: GameState): GameAction.GameAction[GameState] =
+        let ballPos = getBallPos(state);
+        let sh = Int32.toFloat32(screenHeight());
+        if (ballPos#y >= sh) {
+            let scene1 = SceneTree.updateRigidBody("Ball",
+                _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()}, stuck = true},
+                state#scene);
+            GameAction.of({scene = scene1 | state}, GameEvent.BallReset :: Nil)
+        } else GameAction.pure(state)
 }
