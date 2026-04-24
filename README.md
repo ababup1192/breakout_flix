@@ -1,10 +1,12 @@
-# Swing Flix
+# Breakout Flix
 
-Flix で実装した 15 パズルゲーム。Swing GUI + Flix のエフェクトシステムを活用。
+Flix で実装した Breakout（ブロック崩し）ゲーム。LearnOpenGL チュートリアルを忠実に再現し、LWJGL + OpenGL 3.3 Core Profile でレンダリング。
 
 ## 必要環境
 
 - devbox（推奨）
+- JDK 21
+- macOS (Apple Silicon)
 
 ## 実行方法
 
@@ -23,13 +25,25 @@ flix test
 
 ```
 src/
-  Main.flix        - エントリーポイント
-  Game.flix        - ゲームループ（Game エフェクト定義）
-  PuzzleLogic.flix - パズルロジック（Datalog で隣接判定）
-  SwingLayer.flix  - Swing GUI 実装
+  Main.flix          - エントリーポイント・ゲームループ・レンダリング
+test/
+  TestMain.flix      - レベルパース・初期配置のテスト
+levels/
+  one.lvl ~ four.lvl - LearnOpenGL 形式のレベルデータ
+textures/
+  background.jpg     - 背景画像
+  block.png          - 通常ブロック
+  block_solid.png    - 破壊不可ブロック
+  paddle.png         - パドル
+  awesomeface.png    - ボール
 ```
 
-## 特徴
+## 技術スタック
 
-- **エフェクトシステム**: `Game` エフェクトで UI 操作を抽象化
-- **Datalog**: 隣接判定に Flix の Datalog を活用
+- **Flix 0.71.0** - 関数型プログラミング言語
+- **LWJGL 3.3.4** - OpenGL / GLFW / STB バインディング
+- **OpenGL 3.3 Core Profile** - シェーダーベースのスプライトレンダリング
+
+## 操作方法
+
+- **ESC** / ウィンドウ閉じる - 終了
