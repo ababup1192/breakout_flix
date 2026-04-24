@@ -258,7 +258,8 @@ def testPhysicsStepKinematicBody(): Unit \ Assert =
         collisionShape2D("PaddleCollider", SceneTree.CollisionShapeData.RectShape({x = 100.0f32, y = 20.0f32})) :: Nil
     );
     let root = node2D("Root", identityTransform(), paddle :: Nil);
-    let result = SceneTree.physicsStep(root, 0.1f32, {x = 800.0f32, y = 600.0f32});
+    let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 100.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
+    let result = SceneTree.physicsStep(root, 0.1f32, config);
     let pos = SceneTree.globalPosition("Paddle", result);
     let px = pos |> Option.map(p -> p#x);
     Assert.assertEq(expected = Some(150.0f32), px)
@@ -274,7 +275,8 @@ def testPhysicsStepRigidBodyStuck(): Unit \ Assert =
         collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
     );
     let root = node2D("Root", identityTransform(), paddle :: ball :: Nil);
-    let result = SceneTree.physicsStep(root, 0.1f32, {x = 800.0f32, y = 600.0f32});
+    let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 350.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
+    let result = SceneTree.physicsStep(root, 0.1f32, config);
     let pos = SceneTree.globalPosition("Ball", result);
     let px = pos |> Option.map(p -> p#x);
     let expectedX = 350.0f32 + 100.0f32 / 2.0f32 - 12.5f32;

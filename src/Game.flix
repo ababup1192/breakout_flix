@@ -181,9 +181,14 @@ mod Game {
 
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
-        let screenSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())};
         let s1 = processInput(state);
-        let s2 = {scene = SceneTree.physicsStep(s1#scene, dt, screenSize) | s1};
+        let paddle = BreakoutScene.paddleSnapshot(s1#scene);
+        let config = {
+            screenSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())},
+            anchorPos = paddle#pos,
+            anchorWidth = paddle#size#x
+        };
+        let s2 = {scene = SceneTree.physicsStep(s1#scene, dt, config) | s1};
         let (s3, allEvents) = GameAction.unpack(forM (
             sa <- doBrickCollisions(s2);
             sb <- doPaddleCollision(sa);
@@ -210,70 +215,25 @@ mod Game {
         let velLeft = if (Game.isKeyPressed(keyA())) -1.0f32 * playerVelocity() else 0.0f32;
         let velRight = if (Game.isKeyPressed(keyD())) playerVelocity() else 0.0f32;
         let paddleVelX = velLeft + velRight;
-        let s1 = {scene = SceneTree.updateKinematicBody("Paddle",
-            _ -> {velocity = {x = paddleVelX, y = 0.0f32}},
-            state#scene) | state};
+        let s1 = {scene = BreakoutScene.setPaddleVelocity({x = paddleVelX, y = 0.0f32}, state#scene) | state};
         if (Game.isKeyPressed(keySpace())) {
-            {scene = SceneTree.updateRigidBody("Ball",
-                bd -> {stuck = false | bd},
-                s1#scene) | s1}
+            {scene = BreakoutScene.updateBall(bd -> {stuck = false | bd}, s1#scene) | s1}
         } else s1
-
-    // ========================================================================
-    // Helpers to extract ball state
-    // ========================================================================
-
-    pub def getBallPos(state: GameState): Vec2D.Vec2 =
-        SceneTree.findNode("Ball", state#scene)
-            |> Option.map(n -> (SceneTree.nodeTransform(n))#position)
-            |> Option.getWithDefault(Vec2D.zero())
-
-    pub def getBallVel(state: GameState): Vec2D.Vec2 =
-        SceneTree.findNode("Ball", state#scene)
-            |> Option.flatMap(SceneTree.rigidBodyData)
-            |> Option.map(bd -> bd#velocity)
-            |> Option.getWithDefault(Vec2D.zero())
-
-    pub def getBallRadius(state: GameState): Float32 =
-        SceneTree.findNode("Ball", state#scene)
-            |> Option.flatMap(n -> SceneTree.findCircleShape(SceneTree.nodeChildren(n)))
-            |> Option.getWithDefault(ballRadiusConst())
-
-    pub def isBallStuck(state: GameState): Bool =
-        SceneTree.findNode("Ball", state#scene)
-            |> Option.flatMap(SceneTree.rigidBodyData)
-            |> Option.map(bd -> bd#stuck)
-            |> Option.getWithDefault(true)
-
-    pub def getPaddlePos(state: GameState): Vec2D.Vec2 =
-        SceneTree.findNode("Paddle", state#scene)
-            |> Option.map(n -> (SceneTree.nodeTransform(n))#position)
-            |> Option.getWithDefault(Vec2D.zero())
-
-    def getPaddleSize(state: GameState): Vec2D.Vec2 =
-        SceneTree.findNode("Paddle", state#scene)
-            |> Option.flatMap(n -> SceneTree.findRectShape(SceneTree.nodeChildren(n)))
-            |> Option.getWithDefault({x = playerWidth(), y = playerHeight()})
 
     // ========================================================================
     // Collision: Bricks
     // ========================================================================
 
     def doBrickCollisions(state: GameState): GameAction.GameAction[GameState] =
-        if (isBallStuck(state)) GameAction.pure(state)
+        let ball = BreakoutScene.ballSnapshot(state#scene);
+        if (ball#stuck) GameAction.pure(state)
         else {
-            let ballPos = getBallPos(state);
-            let ballVel = getBallVel(state);
-            let radius = getBallRadius(state);
-            let brickNodes = SceneTree.findNode("Bricks", state#scene)
-                |> Option.map(SceneTree.nodeChildren)
-                |> Option.getWithDefault(Nil);
-            let init: BrickFoldAcc = {bricks = Nil, ballPos = ballPos, ballVel = ballVel, events = Nil, index = 0};
-            let result = List.foldLeft((acc, brick) -> brickCollisionStep(radius, acc, brick), init, brickNodes);
-            let newBricksNode = SceneTree.node2D("Bricks", SceneTree.identityTransform(), List.reverse(result#bricks));
-            let scene1 = SceneTree.mapNode("Bricks", _ -> newBricksNode, state#scene);
-            let scene2 = SceneTree.updateRigidBody("Ball", bd -> {velocity = result#ballVel | bd},
-                SceneTree.setNodePosition("Ball", result#ballPos, scene1));
+            let bricks = BreakoutScene.brickNodes(state#scene);
+            let init: BrickFoldAcc = {bricks = Nil, ballPos = ball#pos, ballVel = ball#vel, events = Nil, index = 0};
+            let result = List.foldLeft((acc, brick) -> brickCollisionStep(ball#radius, acc, brick), init, bricks);
+            let scene1 = BreakoutScene.replaceBricks(List.reverse(result#bricks), state#scene);
+            let scene2 = BreakoutScene.updateBall(bd -> {velocity = result#ballVel | bd},
+                BreakoutScene.setBallPosition(result#ballPos, scene1));
             GameAction.of({scene = scene2 | state}, List.reverse(result#events))
         }
 
@@ -304,26 +264,22 @@ mod Game {
     // ========================================================================
 
     def doPaddleCollision(state: GameState): GameAction.GameAction[GameState] =
-        if (isBallStuck(state)) GameAction.pure(state)
+        let ball = BreakoutScene.ballSnapshot(state#scene);
+        if (ball#stuck) GameAction.pure(state)
         else {
-            let ballPos = getBallPos(state);
-            let ballVel = getBallVel(state);
-            let radius = getBallRadius(state);
-            let paddlePos = getPaddlePos(state);
-            let paddleSize = getPaddleSize(state);
-            match SceneTree.checkCircleRect(ballPos, radius, paddlePos, paddleSize) {
+            let paddle = BreakoutScene.paddleSnapshot(state#scene);
+            match SceneTree.checkCircleRect(ball#pos, ball#radius, paddle#pos, paddle#size) {
                 case None => GameAction.pure(state)
                 case Some(_) =>
-                    let centerBoard = paddlePos#x + paddleSize#x / 2.0f32;
-                    let distance = (ballPos#x + radius) - centerBoard;
-                    let percentage = distance / (paddleSize#x / 2.0f32);
+                    let centerBoard = paddle#pos#x + paddle#size#x / 2.0f32;
+                    let distance = (ball#pos#x + ball#radius) - centerBoard;
+                    let percentage = distance / (paddle#size#x / 2.0f32);
                     let strength = 2.0f32;
-                    let speed = Vec2D.length(ballVel);
+                    let speed = Vec2D.length(ball#vel);
                     let newVx = initialBallVelocityX() * percentage * strength;
-                    let newVy = -1.0f32 * Float32.abs(ballVel#y);
+                    let newVy = -1.0f32 * Float32.abs(ball#vel#y);
                     let newVel = Vec2D.mul(Vec2D.normalized({x = newVx, y = newVy}), speed);
-                    let scene1 = SceneTree.updateRigidBody("Ball",
-                        bd -> {velocity = newVel | bd}, state#scene);
+                    let scene1 = BreakoutScene.setBallVelocity(newVel, state#scene);
                     GameAction.of({scene = scene1 | state}, GameEvent.PaddleHit :: Nil)
             }
         }
@@ -333,12 +289,10 @@ mod Game {
     // ========================================================================
 
     def checkDeathZone(state: GameState): GameAction.GameAction[GameState] =
-        let ballPos = getBallPos(state);
-        let deathY = SceneTree.findNode("DeathZone", state#scene)
-            |> Option.map(n -> (SceneTree.nodeTransform(n))#position#y)
-            |> Option.getWithDefault(Int32.toFloat32(screenHeight()));
+        let ballPos = BreakoutScene.ballPos(state#scene);
+        let deathY = BreakoutScene.deathZoneY(state#scene);
         if (ballPos#y >= deathY) {
-            let scene1 = SceneTree.updateRigidBody("Ball",
+            let scene1 = BreakoutScene.updateBall(
                 _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()}, stuck = true},
                 state#scene);
             GameAction.of({scene = scene1 | state}, GameEvent.BallReset :: Nil)

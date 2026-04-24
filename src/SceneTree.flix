@@ -48,6 +48,12 @@ mod SceneTree {
         destroyed = Bool
     }
 
+    pub type alias PhysicsConfig = {
+        screenSize = Vec2D.Vec2,
+        anchorPos = Vec2D.Vec2,
+        anchorWidth = Float32
+    }
+
     // ========================================================================
     // Constructors (Godot vocabulary)
     // ========================================================================
@@ -303,29 +309,22 @@ mod SceneTree {
     // Engine: physicsStep
     // ========================================================================
 
-    pub def physicsStep(root: Node, dt: Float32, screenSize: Vec2D.Vec2): Node =
-        let paddlePos = findNode("Paddle", root) |> Option.map(n -> (nodeTransform(n))#position) |> Option.getWithDefault(Vec2D.zero());
-        let paddleWidth = findNode("Paddle", root)
-            |> Option.flatMap(n -> List.findMap(child -> match nodeKind(child) {
-                case NodeKind.Shape(CollisionShapeData.RectShape(size)) => Some(size#x)
-                case _ => None
-            }, nodeChildren(n)))
-            |> Option.getWithDefault(100.0f32);
-        physicsStepNode(root, dt, screenSize, paddlePos, paddleWidth)
+    pub def physicsStep(root: Node, dt: Float32, config: PhysicsConfig): Node =
+        physicsStepNode(root, dt, config)
 
-    def physicsStepNode(node: Node, dt: Float32, screenSize: Vec2D.Vec2, paddlePos: Vec2D.Vec2, paddleWidth: Float32): Node =
+    def physicsStepNode(node: Node, dt: Float32, config: PhysicsConfig): Node =
         let Node.MkNode(name, transform, kind, children) = node;
         match kind {
             case NodeKind.Kinematic(bodyData) =>
                 let newX = transform#position#x + bodyData#velocity#x * dt;
-                let clampedX = Float32.max(0.0f32, Float32.min(screenSize#x - paddleWidth, newX));
+                let clampedX = Float32.max(0.0f32, Float32.min(config#screenSize#x - config#anchorWidth, newX));
                 let newTransform = {position = {x = clampedX, y = transform#position#y} | transform};
                 Node.MkNode(name, newTransform, kind, children)
             case NodeKind.Rigid(bodyData) =>
                 if (bodyData#stuck) {
                     let ballRadius = findCircleShape(children) |> Option.getWithDefault(12.5f32);
-                    let bx = paddlePos#x + paddleWidth / 2.0f32 - ballRadius;
-                    let by = paddlePos#y - ballRadius * 2.0f32;
+                    let bx = config#anchorPos#x + config#anchorWidth / 2.0f32 - ballRadius;
+                    let by = config#anchorPos#y - ballRadius * 2.0f32;
                     let newTransform = {position = {x = bx, y = by} | transform};
                     Node.MkNode(name, newTransform, kind, children)
                 } else {
@@ -335,14 +334,14 @@ mod SceneTree {
                     let vx0 = bodyData#velocity#x;
                     let vy0 = bodyData#velocity#y;
                     let (nx1, vx1) = if (newX <= 0.0f32) (0.0f32, Float32.abs(vx0)) else (newX, vx0);
-                    let (nx2, vx2) = if (nx1 + ballSize >= screenSize#x) (screenSize#x - ballSize, -1.0f32 * Float32.abs(vx1)) else (nx1, vx1);
+                    let (nx2, vx2) = if (nx1 + ballSize >= config#screenSize#x) (config#screenSize#x - ballSize, -1.0f32 * Float32.abs(vx1)) else (nx1, vx1);
                     let (ny1, vy1) = if (newY <= 0.0f32) (0.0f32, Float32.abs(vy0)) else (newY, vy0);
                     let newTransform = {position = {x = nx2, y = ny1} | transform};
                     let newBodyData = {velocity = {x = vx2, y = vy1} | bodyData};
                     Node.MkNode(name, newTransform, NodeKind.Rigid(newBodyData), children)
                 }
             case NodeKind.Plain =>
-                Node.MkNode(name, transform, kind, List.map(child -> physicsStepNode(child, dt, screenSize, paddlePos, paddleWidth), children))
+                Node.MkNode(name, transform, kind, List.map(child -> physicsStepNode(child, dt, config), children))
             case _ => node
         }
 }

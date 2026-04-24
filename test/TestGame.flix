@@ -7,8 +7,7 @@ use Game.{parseLevelLine, parseLevel, initGame,
           initialBallVelocityX, initialBallVelocityY,
           processInput,
           keyA, keyD, keySpace,
-          handleEvents, tickShake,
-          getBallPos, getBallVel, isBallStuck, getPaddlePos}
+          handleEvents, tickShake}
 use Game.GameEvent
 
 // --- parseLevelLine ---
@@ -76,28 +75,28 @@ def dummyFileRead(f: Unit -> a \ ef): a \ ef - Fs.FileRead =
 @Test
 def testInitGamePaddlePosition(): Unit \ Assert =
     let state = run { initGame(800, 600) } with dummyFileRead;
-    let pos = getPaddlePos(state);
+    let pos = BreakoutScene.paddlePos(state#scene);
     Assert.assertEq(expected = 350.0f32, pos#x);
     Assert.assertEq(expected = 580.0f32, pos#y)
 
 @Test
 def testInitGameBallPosition(): Unit \ Assert =
     let state = run { initGame(800, 600) } with dummyFileRead;
-    let pos = getBallPos(state);
+    let pos = BreakoutScene.ballPos(state#scene);
     Assert.assertEq(expected = 387.5f32, pos#x);
     Assert.assertEq(expected = 555.0f32, pos#y)
 
 @Test
 def testInitGameBallVelocity(): Unit \ Assert =
     let state = run { initGame(800, 600) } with dummyFileRead;
-    let vel = getBallVel(state);
+    let vel = (BreakoutScene.ballSnapshot(state#scene))#vel;
     Assert.assertEq(expected = 100.0f32, vel#x);
     Assert.assertEq(expected = -350.0f32, vel#y)
 
 @Test
 def testInitGameBallStuck(): Unit \ Assert =
     let state = run { initGame(800, 600) } with dummyFileRead;
-    Assert.assertTrue(isBallStuck(state))
+    Assert.assertTrue(BreakoutScene.isBallStuck(state#scene))
 
 // --- Scene tree based test state helper ---
 
@@ -154,13 +153,21 @@ def mkTestStateWithShake(
         shakeTime = shake
     }
 
+def mkTestPhysicsConfig(state: Game.GameState): SceneTree.PhysicsConfig =
+    {
+        screenSize = {x = 800.0f32, y = 600.0f32},
+        anchorPos = BreakoutScene.paddlePos(state#scene),
+        anchorWidth = (BreakoutScene.paddleSize(state#scene))#x
+    }
+
 // --- physicsStep via engine (replaces moveBall tests) ---
 
 @Test
 def testPhysicsStepBallStuck(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let result = {scene = SceneTree.physicsStep(state#scene, 0.016f32, {x = 800.0f32, y = 600.0f32}) | state};
-    let pos = getBallPos(result);
+    let config = mkTestPhysicsConfig(state);
+    let result = {scene = SceneTree.physicsStep(state#scene, 0.016f32, config) | state};
+    let pos = BreakoutScene.ballPos(result#scene);
     let expectedX = 350.0f32 + playerWidth() / 2.0f32 - ballRadiusConst();
     let expectedY = 580.0f32 - ballRadiusConst() * 2.0f32;
     Assert.assertEq(expected = expectedX, pos#x);
@@ -169,17 +176,19 @@ def testPhysicsStepBallStuck(): Unit \ Assert =
 @Test
 def testPhysicsStepBallNormal(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 300.0f32, 100.0f32, -350.0f32, false);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, {x = 800.0f32, y = 600.0f32}) | state};
-    let pos = getBallPos(result);
+    let config = mkTestPhysicsConfig(state);
+    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let pos = BreakoutScene.ballPos(result#scene);
     Assert.assertEq(expected = 500.0f32, pos#x);
     Assert.assertEq(expected = 0.0f32, pos#y)
 
 @Test
 def testPhysicsStepBallLeftWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 5.0f32, 300.0f32, -100.0f32, 0.0f32, false);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, {x = 800.0f32, y = 600.0f32}) | state};
-    let pos = getBallPos(result);
-    let vel = getBallVel(result);
+    let config = mkTestPhysicsConfig(state);
+    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let pos = BreakoutScene.ballPos(result#scene);
+    let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#x);
     Assert.assertTrue(vel#x > 0.0f32)
 
@@ -188,18 +197,20 @@ def testPhysicsStepBallRightWall(): Unit \ Assert =
     let ballSize = ballRadiusConst() * 2.0f32;
     let startX = Int32.toFloat32(screenWidth()) - ballSize - 10.0f32;
     let state = mkTestState(350.0f32, 580.0f32, startX, 300.0f32, 200.0f32, 0.0f32, false);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, {x = 800.0f32, y = 600.0f32}) | state};
-    let pos = getBallPos(result);
-    let vel = getBallVel(result);
+    let config = mkTestPhysicsConfig(state);
+    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let pos = BreakoutScene.ballPos(result#scene);
+    let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = Int32.toFloat32(screenWidth()) - ballSize, pos#x);
     Assert.assertTrue(vel#x < 0.0f32)
 
 @Test
 def testPhysicsStepBallTopWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 5.0f32, 0.0f32, -100.0f32, false);
-    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, {x = 800.0f32, y = 600.0f32}) | state};
-    let pos = getBallPos(result);
-    let vel = getBallVel(result);
+    let config = mkTestPhysicsConfig(state);
+    let result = {scene = SceneTree.physicsStep(state#scene, 1.0f32, config) | state};
+    let pos = BreakoutScene.ballPos(result#scene);
+    let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#y);
     Assert.assertTrue(vel#y > 0.0f32)
 
@@ -208,10 +219,10 @@ def testPhysicsStepBallTopWall(): Unit \ Assert =
 @Test
 def testCheckDeathZoneInBounds(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 300.0f32, 100.0f32, -350.0f32, false);
-    let pos = getBallPos(state);
+    let pos = BreakoutScene.ballPos(state#scene);
     Assert.assertEq(expected = 400.0f32, pos#x);
     Assert.assertEq(expected = 300.0f32, pos#y);
-    Assert.assertFalse(isBallStuck(state))
+    Assert.assertFalse(BreakoutScene.isBallStuck(state#scene))
 
 // --- processInput ---
 
@@ -248,7 +259,7 @@ def testProcessInputSetsPaddleVelocityRight(): Unit \ Assert =
 def testProcessInputLaunchBall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
     let result = run { processInput(state) } with withMockInput(Set#{keySpace()});
-    Assert.assertFalse(isBallStuck(result))
+    Assert.assertFalse(BreakoutScene.isBallStuck(result#scene))
 
 // --- handleEvents ---
 
