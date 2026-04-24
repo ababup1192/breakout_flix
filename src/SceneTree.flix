@@ -166,6 +166,19 @@ mod SceneTree {
             case _ => None
         }
 
+    pub def staticBodyData(node: Node): Option[StaticBodyData] =
+        match node {
+            case Node.StaticBody2D(_, _, bd, _) => Some(bd)
+            case _ => None
+        }
+
+    pub def modifyStaticBody(f: StaticBodyData -> StaticBodyData, node: Node): Node =
+        match node {
+            case Node.StaticBody2D(n, t, bd, children) =>
+                Node.StaticBody2D(n, t, f(bd), children)
+            case other => other
+        }
+
     pub def findRectShape(children: List[Node]): Option[Vec2D.Vec2] =
         List.findMap(child -> match child {
             case Node.CollisionShape2D(_, CollisionShapeData.RectShape(size)) => Some(size)

@@ -30,7 +30,13 @@ mod Game {
         shakeTime = Float32
     }
 
-    type alias BrickFoldAcc = (List[(String, SceneTree.Node)], Vec2D.Vec2, Vec2D.Vec2, List[GameEvent], Int32)
+    type alias BrickFoldAcc = {
+        bricks = List[SceneTree.Node],
+        ballPos = Vec2D.Vec2,
+        ballVel = Vec2D.Vec2,
+        events = List[GameEvent],
+        index = Int32
+    }
 
     pub type alias TextureRegistry = Map[String, Int32]
 
@@ -262,39 +268,37 @@ mod Game {
             let brickNodes = SceneTree.findNode("Bricks", state#scene)
                 |> Option.map(SceneTree.nodeChildren)
                 |> Option.getWithDefault(Nil);
-            let init: BrickFoldAcc = (Nil, ballPos, ballVel, Nil, 0);
-            let (updatedBricks, newBallPos, newBallVel, events, _) =
-                List.foldLeft((acc, brickNode) -> brickCollisionStep(radius, acc, brickNode), init, brickNodes);
-            let newBricksNode = SceneTree.Node.Node2D("Bricks", SceneTree.identityTransform(), List.reverse(updatedBricks) |> List.map(match (_, n) -> n));
+            let init: BrickFoldAcc = {bricks = Nil, ballPos = ballPos, ballVel = ballVel, events = Nil, index = 0};
+            let result = List.foldLeft((acc, brick) -> brickCollisionStep(radius, acc, brick), init, brickNodes);
+            let newBricksNode = SceneTree.Node.Node2D("Bricks", SceneTree.identityTransform(), List.reverse(result#bricks));
             let scene1 = SceneTree.mapNode("Bricks", _ -> newBricksNode, state#scene);
-            let scene2 = SceneTree.updateRigidBody("Ball", bd -> {velocity = newBallVel | bd},
-                SceneTree.setNodePosition("Ball", newBallPos, scene1));
-            GameAction.of({scene = scene2 | state}, List.reverse(events))
+            let scene2 = SceneTree.updateRigidBody("Ball", bd -> {velocity = result#ballVel | bd},
+                SceneTree.setNodePosition("Ball", result#ballPos, scene1));
+            GameAction.of({scene = scene2 | state}, List.reverse(result#events))
         }
 
     def brickCollisionStep(radius: Float32, acc: BrickFoldAcc, brickNode: SceneTree.Node): BrickFoldAcc =
-        let (bricks, bPos, bVel, events, idx) = acc;
-        let brickName = SceneTree.nodeName(brickNode);
-        match brickNode {
-            case SceneTree.Node.StaticBody2D(name, transform, bodyData, children) =>
-                if (bodyData#destroyed) {
-                    ((brickName, brickNode) :: bricks, bPos, bVel, events, idx + 1)
-                } else {
-                    let brickPos = transform#position;
-                    let brickSize = SceneTree.findRectShape(children) |> Option.getWithDefault(Vec2D.zero());
-                    match SceneTree.checkCircleRect(bPos, radius, brickPos, brickSize) {
-                        case None =>
-                            ((brickName, brickNode) :: bricks, bPos, bVel, events, idx + 1)
+        let pass = {bricks = brickNode :: acc#bricks, ballPos = acc#ballPos, ballVel = acc#ballVel, events = acc#events, index = acc#index + 1};
+        match SceneTree.staticBodyData(brickNode) {
+            case None => pass
+            case Some(bodyData) =>
+                if (bodyData#destroyed) pass
+                else {
+                    let brickPos = (SceneTree.nodeTransform(brickNode))#position;
+                    let brickSize = SceneTree.findRectShape(SceneTree.nodeChildren(brickNode))
+                        |> Option.getWithDefault(Vec2D.zero());
+                    match SceneTree.checkCircleRect(acc#ballPos, radius, brickPos, brickSize) {
+                        case None => pass
                         case Some((dir, diff)) =>
-                            let newBodyData = if (bodyData#isSolid) bodyData else {destroyed = true | bodyData};
-                            let newBrick = SceneTree.Node.StaticBody2D(name, transform, newBodyData, children);
-                            let newEvents = if (bodyData#isSolid) GameEvent.SolidBrickHit :: events
-                                            else GameEvent.BrickDestroyed(idx) :: events;
-                            let (newPos, newVel) = SceneTree.resolveCollision(bPos, bVel, radius, dir, diff);
-                            ((brickName, newBrick) :: bricks, newPos, newVel, newEvents, idx + 1)
+                            let updatedBrick = if (bodyData#isSolid) brickNode
+                                else SceneTree.modifyStaticBody(_ -> {destroyed = true | bodyData}, brickNode);
+                            let event = if (bodyData#isSolid) GameEvent.SolidBrickHit
+                                else GameEvent.BrickDestroyed(acc#index);
+                            let (newPos, newVel) = SceneTree.resolveCollision(acc#ballPos, acc#ballVel, radius, dir, diff);
+                            {bricks = updatedBrick :: acc#bricks, ballPos = newPos, ballVel = newVel,
+                             events = event :: acc#events, index = acc#index + 1}
                     }
                 }
-            case _ => ((brickName, brickNode) :: bricks, bPos, bVel, events, idx + 1)
         }
 
     // ========================================================================
@@ -332,8 +336,10 @@ mod Game {
 
     def checkDeathZone(state: GameState): GameAction.GameAction[GameState] =
         let ballPos = getBallPos(state);
-        let sh = Int32.toFloat32(screenHeight());
-        if (ballPos#y >= sh) {
+        let deathY = SceneTree.findNode("DeathZone", state#scene)
+            |> Option.map(n -> (SceneTree.nodeTransform(n))#position#y)
+            |> Option.getWithDefault(Int32.toFloat32(screenHeight()));
+        if (ballPos#y >= deathY) {
             let scene1 = SceneTree.updateRigidBody("Ball",
                 _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()}, stuck = true},
                 state#scene);
