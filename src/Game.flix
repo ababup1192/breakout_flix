@@ -41,11 +41,13 @@ mod Game {
         ballStuck = Bool
     }
 
+    type alias BrickFoldAcc = (List[GameObject], Vec2, Vec2, List[GameEvent], Int32)
+
     pub type alias TextureRegistry = Map[String, Int32]
 
     pub eff Game {
         def getInitialState(): GameState
-        def render(state: GameState): Unit
+        def render(scene: SceneTree.Node): Unit
         def shouldClose(): Bool
         def getDeltaTime(): Float32
         def isKeyPressed(keyCode: Int32): Bool
@@ -198,7 +200,8 @@ mod Game {
     def runLoop(state: GameState): GameState \ Game =
         if (Game.shouldClose()) state
         else {
-            let newState = updateGame(state) !> Game.render;
+            let newState = updateGame(state);
+            Game.render(BreakoutScene.toScene(newState));
             runLoop(newState)
         }
 
@@ -219,27 +222,26 @@ mod Game {
     def handleEvents(state: GameState, _events: List[GameEvent]): GameState =
         state
 
+    /// パドルを dx だけ移動（ボールが貼り付いていればボールも追従）
+    def movePlayer(state: GameState, dx: Float32): GameState =
+        let sw = Int32.toFloat32(screenWidth());
+        let rawX = state#player#position#x + dx;
+        let newX = Float32.max(0.0f32, Float32.min(sw - playerWidth(), rawX));
+        let newPlayer = {position = {x = newX, y = state#player#position#y} | state#player};
+        let s = {player = newPlayer | state};
+        if (s#ballStuck) {
+            let bx = newX + playerWidth() / 2.0f32 - ballRadiusConst();
+            {ballPos = {x = bx, y = s#ballPos#y} | s}
+        } else s
+
     /// パドル移動 + ボール発射
     pub def processInput(state: GameState, dt: Float32): (GameState, List[GameEvent]) \ Game =
-        let sw = Int32.toFloat32(screenWidth());
-        let s1 = if (Game.isKeyPressed(keyA())) {
-            let newX = Float32.max(0.0f32, state#player#position#x - playerVelocity() * dt);
-            let newPlayer = {position = {x = newX, y = state#player#position#y} | state#player};
-            let newState = {player = newPlayer | state};
-            if (newState#ballStuck) {
-                let bx = newX + playerWidth() / 2.0f32 - ballRadiusConst();
-                {ballPos = {x = bx, y = newState#ballPos#y} | newState}
-            } else newState
-        } else state;
-        let s2 = if (Game.isKeyPressed(keyD())) {
-            let newX = Float32.min(sw - playerWidth(), s1#player#position#x + playerVelocity() * dt);
-            let newPlayer = {position = {x = newX, y = s1#player#position#y} | s1#player};
-            let newState = {player = newPlayer | s1};
-            if (newState#ballStuck) {
-                let bx = newX + playerWidth() / 2.0f32 - ballRadiusConst();
-                {ballPos = {x = bx, y = newState#ballPos#y} | newState}
-            } else newState
-        } else s1;
+        let s1 = if (Game.isKeyPressed(keyA()))
+                     movePlayer(state, -1.0f32 * playerVelocity() * dt)
+                 else state;
+        let s2 = if (Game.isKeyPressed(keyD()))
+                     movePlayer(s1, playerVelocity() * dt)
+                 else s1;
         if (Game.isKeyPressed(keySpace())) {
             let events = if (s2#ballStuck) GameEvent.BallLaunched :: Nil else Nil;
             ({ballStuck = false | s2}, events)
@@ -319,6 +321,43 @@ mod Game {
         else
             (false, Direction.Up, {x = 0.0f32, y = 0.0f32})
 
+    /// ボールの反射処理: 衝突方向に応じて位置と速度を補正
+    def reflectBall(bPos: Vec2, bVel: Vec2, radius: Float32, dir: Direction, diff: Vec2): (Vec2, Vec2) =
+        let horizontal = (dir == Direction.Left) or (dir == Direction.Right);
+        if (horizontal) {
+            let penetration = radius - Float32.abs(diff#x);
+            let newX = if (dir == Direction.Left) bPos#x + penetration else bPos#x - penetration;
+            ({x = newX, y = bPos#y}, {x = -1.0f32 * bVel#x, y = bVel#y})
+        } else {
+            let penetration = radius - Float32.abs(diff#y);
+            let newY = if (dir == Direction.Up) bPos#y - penetration else bPos#y + penetration;
+            ({x = bPos#x, y = newY}, {x = bVel#x, y = -1.0f32 * bVel#y})
+        }
+
+    /// 1ブリックとの衝突判定・反射を fold のステップとして実行
+    def brickCollisionStep(radius: Float32, acc: BrickFoldAcc, brick: GameObject): BrickFoldAcc =
+        let (bricks, bPos, bVel, events, idx) = acc;
+        if (brick#destroyed)
+            (brick :: bricks, bPos, bVel, events, idx + 1)
+        else {
+            let (collision, dir, diff) = checkCollisionCircleAABB(bPos, radius, brick);
+            if (not collision)
+                (brick :: bricks, bPos, bVel, events, idx + 1)
+            else {
+                let newBrick = if (brick#isSolid) brick else {destroyed = true | brick};
+                let newEvents = if (brick#isSolid) events else GameEvent.BrickDestroyed(idx) :: events;
+                let (newPos, newVel) = reflectBall(bPos, bVel, radius, dir, diff);
+                (newBrick :: bricks, newPos, newVel, newEvents, idx + 1)
+            }
+        }
+
+    /// レベルリスト中の指定インデックスのブリックを差し替え
+    def updateLevelBricks(levels: List[GameLevel], levelIdx: Int32, newBricks: List[GameObject]): List[GameLevel] =
+        let newLevel = {bricks = newBricks};
+        levels |> List.zipWithIndex |> List.map(match (i, lvl) ->
+            if (i == levelIdx) newLevel else lvl
+        )
+
     /// 全衝突処理: ブリック衝突 → パドル衝突（イベント付き）
     def doCollisions(state: GameState): (GameState, List[GameEvent]) =
         if (state#ballStuck) (state, Nil)
@@ -330,48 +369,16 @@ mod Game {
 
     /// ブリック衝突処理: 各ブリックとの衝突を検出し、破壊+ボール反射
     def doBrickCollisions(state: GameState): (GameState, List[GameEvent]) =
-        match List.nth(state#currentLevel, state#levels) {
-            case None => (state, Nil)
-            case Some(level) => {
-                let result = List.foldLeft(
-                    (acc, brick) -> {
-                        let (bricks, bPos, bVel, events, idx) = acc;
-                        if (brick#destroyed)
-                            (brick :: bricks, bPos, bVel, events, idx + 1)
-                        else {
-                            let (collision, dir, diff) = checkCollisionCircleAABB(bPos, state#ballRadius, brick);
-                            if (not collision)
-                                (brick :: bricks, bPos, bVel, events, idx + 1)
-                            else {
-                                let newBrick = if (brick#isSolid) brick else {destroyed = true | brick};
-                                let newEvents = if (brick#isSolid) events else GameEvent.BrickDestroyed(idx) :: events;
-                                let horizontal = (dir == Direction.Left) or (dir == Direction.Right);
-                                if (horizontal) {
-                                    let newVx = -1.0f32 * bVel#x;
-                                    let penetration = state#ballRadius - Float32.abs(diff#x);
-                                    let newX = if (dir == Direction.Left) bPos#x + penetration else bPos#x - penetration;
-                                    (newBrick :: bricks, {x = newX, y = bPos#y}, {x = newVx, y = bVel#y}, newEvents, idx + 1)
-                                } else {
-                                    let newVy = -1.0f32 * bVel#y;
-                                    let penetration = state#ballRadius - Float32.abs(diff#y);
-                                    let newY = if (dir == Direction.Up) bPos#y - penetration else bPos#y + penetration;
-                                    (newBrick :: bricks, {x = bPos#x, y = newY}, {x = bVel#x, y = newVy}, newEvents, idx + 1)
-                                }
-                            }
-                        }
-                    },
-                    (Nil, state#ballPos, state#ballVelocity, Nil, 0),
-                    level#bricks
-                );
-                let (newBricks, newBallPos, newBallVel, events, _) = result;
-                let fixedBricks = List.reverse(newBricks);
-                let newLevel = {bricks = fixedBricks};
-                let newLevels = state#levels |> List.zipWithIndex |> List.map(match (i, lvl) ->
-                    if (i == state#currentLevel) newLevel else lvl
-                );
-                ({levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state}, List.reverse(events))
-            }
-        }
+        let processLevel = level -> {
+            let init: BrickFoldAcc = (Nil, state#ballPos, state#ballVelocity, Nil, 0);
+            let (newBricks, newBallPos, newBallVel, events, _) =
+                List.foldLeft(brickCollisionStep(state#ballRadius), init, level#bricks);
+            let newLevels = updateLevelBricks(state#levels, state#currentLevel, List.reverse(newBricks));
+            ({levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state}, List.reverse(events))
+        };
+        List.nth(state#currentLevel, state#levels)
+            |> Option.map(processLevel)
+            |> Option.getWithDefault((state, Nil))
 
     /// パドル衝突処理: 打ち返し角度をヒット位置に基づき調整
     def doPaddleCollision(state: GameState): (GameState, List[GameEvent]) =

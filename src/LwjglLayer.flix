@@ -193,11 +193,10 @@ mod LwjglLayer {
     // Rendering (SceneTree-based, generic — no changes needed for new entities)
     // ============================================================================
 
-    def renderState(state: Game.GameState, registry: Game.TextureRegistry, shader: Int32, vao: Int32): Unit \ IO =
+    def renderScene(scene: SceneTree.Node, registry: Game.TextureRegistry, shader: Int32, vao: Int32): Unit \ IO =
         GL11.glClearColor(0.0f32, 0.0f32, 0.0f32, 1.0f32);
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
 
-        let scene = BreakoutScene.toScene(state);
         let drawables = SceneTree.collectDrawables(scene, {x = 0.0f32, y = 0.0f32});
         List.forEach(match (spriteData, globalPos) -> {
             match Map.get(spriteData#texture, registry) {
@@ -258,8 +257,8 @@ mod LwjglLayer {
                 println("Game ready! Press ESC or close window to exit.");
                 k(state)
             }
-            def render(state, k) = {
-                renderState(state, registry, shader, vao);
+            def render(scene, k) = {
+                renderScene(scene, registry, shader, vao);
                 GLFW.glfwSwapBuffers(window);
                 k(())
             }
