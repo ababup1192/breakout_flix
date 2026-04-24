@@ -16,6 +16,8 @@ mod LwjglLayer {
     import java.lang.Runtime
     import java.lang.Thread
 
+    import java.lang.System
+
     // ============================================================================
     // Textures
     // ============================================================================
@@ -234,7 +236,7 @@ mod LwjglLayer {
 
         // Draw background
         let bgPos = {x = 0.0f32, y = 0.0f32};
-        let bgSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())};
+        let bgSize = {x = Int32.toFloat32(Game.screenWidth()), y = Int32.toFloat32(Game.screenHeight())};
         drawSprite(shader, resolveTexture(textures, Game.TextureKind.Background), vao, bgPos, bgSize, {r = 1.0f32, g = 1.0f32, b = 1.0f32});
 
         // Draw level bricks
@@ -275,15 +277,15 @@ mod LwjglLayer {
         GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_FORWARD_COMPAT, GL11.GL_TRUE);
         GLFW.glfwWindowHint(GLFW.GLFW_RESIZABLE, GL11.GL_FALSE);
 
-        let window = GLFW.glfwCreateWindow(screenWidth(), screenHeight(), "Breakout", MemoryUtil.NULL, MemoryUtil.NULL);
+        let window = GLFW.glfwCreateWindow(Game.screenWidth(), Game.screenHeight(), "Breakout", MemoryUtil.NULL, MemoryUtil.NULL);
         GLFW.glfwMakeContextCurrent(window);
         GLFW.glfwSwapInterval(1);
         discard GL.createCapabilities();
 
         // Retina display support (macOS typically uses 2x scale)
         let retinaScale = 2;
-        let fbWidth = screenWidth() * retinaScale;
-        let fbHeight = screenHeight() * retinaScale;
+        let fbWidth = Game.screenWidth() * retinaScale;
+        let fbHeight = Game.screenHeight() * retinaScale;
         println("Using ${retinaScale}x scale for Retina display: ${fbWidth}x${fbHeight}");
 
         GL11.glViewport(0, 0, fbWidth, fbHeight);
@@ -291,17 +293,19 @@ mod LwjglLayer {
         GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
 
         let shader = createShaderProgram(vertexShaderSource(), fragmentShaderSource());
-        setProjectionMatrix(shader, Int32.toFloat32(screenWidth()), Int32.toFloat32(screenHeight()));
+        setProjectionMatrix(shader, Int32.toFloat32(Game.screenWidth()), Int32.toFloat32(Game.screenHeight()));
 
         let (vao, _vbo) = initSpriteRenderer();
         let textures = loadTextures();
 
         println("Loading levels...");
 
+        let timeHolder = Array#{System.nanoTime()} @ Static;
+
         let result = run { f() } with handler Game.Game {
             def getInitialState(_, k) = {
                 let state = run {
-                    initGame(screenWidth(), screenHeight())
+                    Game.initGame(Game.screenWidth(), Game.screenHeight())
                 } with Fs.FileRead.runWithIO;
                 println("Game ready! Press ESC or close window to exit.");
                 k(state)
@@ -321,6 +325,17 @@ mod LwjglLayer {
                 } else {
                     k(false)
                 }
+            }
+            def getDeltaTime(_, k) = {
+                let currentTime = System.nanoTime();
+                let prev = Array.get(0, timeHolder);
+                Array.put(currentTime, 0, timeHolder);
+                let dtNanos = currentTime - prev;
+                let dtf = Int64.toFloat32(dtNanos) / 1000000000.0f32;
+                k(dtf)
+            }
+            def isKeyPressed(keyCode, k) = {
+                k(GLFW.glfwGetKey(window, keyCode) == 1)
             }
         };
 
