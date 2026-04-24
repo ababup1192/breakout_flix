@@ -212,11 +212,12 @@ mod Game {
     /// 1フレームの更新を統合: 入力処理 → ボール移動 → 衝突処理 → リセット判定
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
-        let (s1, events1) = processInput(state, dt);
-        let (s2, events2) = moveBall(s1, dt) |> doCollisions;
-        let s3 = checkBallReset(s2);
-        let allEvents = List.append(events1, events2);
-        handleEvents(s3, allEvents)
+        let (finalState, allEvents) = GameAction.unpack(forM (
+            s1 <- processInput(state, dt);
+            s2 <- doCollisions(moveBall(s1, dt));
+            s3 <- checkBallReset(s2)
+        ) yield s3);
+        handleEvents(finalState, allEvents)
 
     /// イベントハンドラ（将来、スコア・サウンド・エフェクト等を追加）
     def handleEvents(state: GameState, _events: List[GameEvent]): GameState =
@@ -235,7 +236,7 @@ mod Game {
         } else s
 
     /// パドル移動 + ボール発射
-    pub def processInput(state: GameState, dt: Float32): (GameState, List[GameEvent]) \ Game =
+    pub def processInput(state: GameState, dt: Float32): GameAction.GameAction[GameState] \ Game =
         let s1 = if (Game.isKeyPressed(keyA()))
                      movePlayer(state, -1.0f32 * playerVelocity() * dt)
                  else state;
@@ -244,8 +245,8 @@ mod Game {
                  else s1;
         if (Game.isKeyPressed(keySpace())) {
             let events = if (s2#ballStuck) GameEvent.BallLaunched :: Nil else Nil;
-            ({ballStuck = false | s2}, events)
-        } else (s2, Nil)
+            GameAction.of({ballStuck = false | s2}, events)
+        } else GameAction.pure(s2)
 
     /// ボール物理: 移動 + 壁反射（純粋関数）
     pub def moveBall(state: GameState, dt: Float32): GameState =
@@ -266,16 +267,18 @@ mod Game {
             {ballPos = {x = nx2, y = ny1}, ballVelocity = {x = vx2, y = vy1} | state}
         }
 
-    /// 画面下に落ちたらリセット（純粋関数）
-    pub def checkBallReset(state: GameState): GameState =
+    /// 画面下に落ちたらリセット（BallResetイベントを発火）
+    pub def checkBallReset(state: GameState): GameAction.GameAction[GameState] =
         let sh = Int32.toFloat32(screenHeight());
         if (state#ballPos#y >= sh) {
             let px = state#player#position#x + playerWidth() / 2.0f32 - state#ballRadius;
             let py = state#player#position#y - state#ballRadius * 2.0f32;
-            {ballPos = {x = px, y = py},
-             ballVelocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
-             ballStuck = true | state}
-        } else state
+            GameAction.of(
+                {ballPos = {x = px, y = py},
+                 ballVelocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
+                 ballStuck = true | state},
+                GameEvent.BallReset :: Nil)
+        } else GameAction.pure(state)
 
     // ========================================================================
     // Collision Detection (LearnOpenGL Circle-AABB)
@@ -359,31 +362,34 @@ mod Game {
         )
 
     /// 全衝突処理: ブリック衝突 → パドル衝突（イベント付き）
-    def doCollisions(state: GameState): (GameState, List[GameEvent]) =
-        if (state#ballStuck) (state, Nil)
+    def doCollisions(state: GameState): GameAction.GameAction[GameState] =
+        if (state#ballStuck) GameAction.pure(state)
         else {
-            let (s1, events1) = doBrickCollisions(state);
-            let (s2, events2) = doPaddleCollision(s1);
-            (s2, List.append(events1, events2))
+            forM (
+                s1 <- doBrickCollisions(state);
+                s2 <- doPaddleCollision(s1)
+            ) yield s2
         }
 
     /// ブリック衝突処理: 各ブリックとの衝突を検出し、破壊+ボール反射
-    def doBrickCollisions(state: GameState): (GameState, List[GameEvent]) =
+    def doBrickCollisions(state: GameState): GameAction.GameAction[GameState] =
         let processLevel = level -> {
             let init: BrickFoldAcc = (Nil, state#ballPos, state#ballVelocity, Nil, 0);
             let (newBricks, newBallPos, newBallVel, events, _) =
                 List.foldLeft(brickCollisionStep(state#ballRadius), init, level#bricks);
             let newLevels = updateLevelBricks(state#levels, state#currentLevel, List.reverse(newBricks));
-            ({levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state}, List.reverse(events))
+            GameAction.of(
+                {levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state},
+                List.reverse(events))
         };
         List.nth(state#currentLevel, state#levels)
             |> Option.map(processLevel)
-            |> Option.getWithDefault((state, Nil))
+            |> Option.getWithDefault(GameAction.pure(state))
 
     /// パドル衝突処理: 打ち返し角度をヒット位置に基づき調整
-    def doPaddleCollision(state: GameState): (GameState, List[GameEvent]) =
+    def doPaddleCollision(state: GameState): GameAction.GameAction[GameState] =
         let (collision, _, _) = checkCollisionCircleAABB(state#ballPos, state#ballRadius, state#player);
-        if (not collision) (state, Nil)
+        if (not collision) GameAction.pure(state)
         else {
             let centerBoard = state#player#position#x + state#player#size#x / 2.0f32;
             let distance = (state#ballPos#x + state#ballRadius) - centerBoard;
@@ -397,6 +403,8 @@ mod Game {
             let len = sqrt32(newVx * newVx + newVy * newVy);
             let finalVx = if (len > 0.0f32) newVx / len * speed else newVx;
             let finalVy = if (len > 0.0f32) newVy / len * speed else newVy;
-            ({ballVelocity = {x = finalVx, y = finalVy} | state}, GameEvent.PaddleHit :: Nil)
+            GameAction.of(
+                {ballVelocity = {x = finalVx, y = finalVy} | state},
+                GameEvent.PaddleHit :: Nil)
         }
 }

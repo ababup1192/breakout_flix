@@ -199,7 +199,7 @@ def testMoveBallTopWall(): Unit \ Assert =
 @Test
 def testCheckBallResetInBounds(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 300.0f32, 100.0f32, -350.0f32, false);
-    let result = checkBallReset(state);
+    let (result, _) = GameAction.unpack(checkBallReset(state));
     Assert.assertEq(expected = 400.0f32, result#ballPos#x);
     Assert.assertEq(expected = 300.0f32, result#ballPos#y);
     Assert.assertFalse(result#ballStuck)
@@ -209,7 +209,7 @@ def testCheckBallResetInBounds(): Unit \ Assert =
 def testCheckBallResetBelowScreen(): Unit \ Assert =
     let sh = Int32.toFloat32(screenHeight());
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, sh + 10.0f32, 100.0f32, 200.0f32, false);
-    let result = checkBallReset(state);
+    let (result, _) = GameAction.unpack(checkBallReset(state));
     let expectedX = 350.0f32 + playerWidth() / 2.0f32 - ballRadiusConst();
     let expectedY = 580.0f32 - ballRadiusConst() * 2.0f32;
     Assert.assertEq(expected = expectedX, result#ballPos#x);
@@ -234,28 +234,28 @@ def withMockInput(pressedKeys: Set[Int32], f: Unit -> a \ ef): a \ ef - Game.Gam
 @Test
 def testProcessInputMoveLeft(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, false);
-    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()});
+    let (result, _) = GameAction.unpack(run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()}));
     Assert.assertTrue(result#player#position#x < 100.0f32)
 
 // Dキーでパドルが右に移動
 @Test
 def testProcessInputMoveRight(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, false);
-    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyD()});
+    let (result, _) = GameAction.unpack(run { processInput(state, 0.1f32) } with withMockInput(Set#{keyD()}));
     Assert.assertTrue(result#player#position#x > 100.0f32)
 
 // Spaceキーでボール発射
 @Test
 def testProcessInputLaunchBall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keySpace()});
+    let (result, _) = GameAction.unpack(run { processInput(state, 0.1f32) } with withMockInput(Set#{keySpace()}));
     Assert.assertFalse(result#ballStuck)
 
 // 固定中にAキー → ボールもパドルに追従
 @Test
 def testProcessInputStuckBallFollowsPaddle(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()});
+    let (result, _) = GameAction.unpack(run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()}));
     let expectedBallX = result#player#position#x + playerWidth() / 2.0f32 - ballRadiusConst();
     Assert.assertEq(expected = expectedBallX, result#ballPos#x)
 
