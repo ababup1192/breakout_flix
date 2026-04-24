@@ -1,7 +1,6 @@
 // Tests for Breakout game logic — non-trivial computations only
 
 use Game.Direction.{Up, Right, Down, Left}
-use Game.TextureKind.{Block, BlockSolid, Paddle}
 use Game.{parseLevelLine, parseLevel, initGame,
           playerWidth, playerHeight, ballRadiusConst,
           screenWidth, screenHeight,
@@ -63,24 +62,24 @@ def testParseLevelBrickPosition(): Unit \ Assert =
     Assert.assertEq(expected = Some(200.0f32), px);
     Assert.assertEq(expected = Some(0.0f32), py)
 
-// tileType 1 → isSolid=true, テクスチャ=BlockSolid
+// tileType 1 → isSolid=true, テクスチャ=block_solid
 @Test
 def testParseLevelSolidBrick(): Unit \ Assert =
     let level = parseLevel("1", 100, 100);
     let solid = List.head(level#bricks) |> Option.map(b -> b#isSolid);
-    let texKind = List.head(level#bricks) |> Option.map(b -> b#textureKind);
+    let tex = List.head(level#bricks) |> Option.map(b -> b#texture);
     Assert.assertEq(expected = Some(true), solid);
-    Assert.assertEq(expected = Some(BlockSolid), texKind)
+    Assert.assertEq(expected = Some("block_solid"), tex)
 
-// tileType 2 → isSolid=false, テクスチャ=Block, 色=青(r=0.2)
+// tileType 2 → isSolid=false, テクスチャ=block, 色=青(r=0.2)
 @Test
 def testParseLevelNonSolidBrick(): Unit \ Assert =
     let level = parseLevel("2", 100, 100);
     let solid = List.head(level#bricks) |> Option.map(b -> b#isSolid);
-    let texKind = List.head(level#bricks) |> Option.map(b -> b#textureKind);
+    let tex = List.head(level#bricks) |> Option.map(b -> b#texture);
     let red = List.head(level#bricks) |> Option.map(b -> b#color#r);
     Assert.assertEq(expected = Some(false), solid);
-    Assert.assertEq(expected = Some(Block), texKind);
+    Assert.assertEq(expected = Some("block"), tex);
     Assert.assertEq(expected = Some(0.2f32), red)
 
 // --- initGame ---
@@ -144,7 +143,7 @@ def mkTestState(
             color = {r = 1.0f32, g = 1.0f32, b = 1.0f32},
             isSolid = true,
             destroyed = false,
-            textureKind = Paddle
+            texture = "paddle"
         },
         ballPos = {x = bx, y = by},
         ballVelocity = {x = vx, y = vy},
@@ -235,28 +234,28 @@ def withMockInput(pressedKeys: Set[Int32], f: Unit -> a \ ef): a \ ef - Game.Gam
 @Test
 def testProcessInputMoveLeft(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, false);
-    let result = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()});
+    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()});
     Assert.assertTrue(result#player#position#x < 100.0f32)
 
 // Dキーでパドルが右に移動
 @Test
 def testProcessInputMoveRight(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, false);
-    let result = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyD()});
+    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyD()});
     Assert.assertTrue(result#player#position#x > 100.0f32)
 
 // Spaceキーでボール発射
 @Test
 def testProcessInputLaunchBall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let result = run { processInput(state, 0.1f32) } with withMockInput(Set#{keySpace()});
+    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keySpace()});
     Assert.assertFalse(result#ballStuck)
 
 // 固定中にAキー → ボールもパドルに追従
 @Test
 def testProcessInputStuckBallFollowsPaddle(): Unit \ Assert =
     let state = mkTestState(100.0f32, 580.0f32, 137.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let result = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()});
+    let (result, _) = run { processInput(state, 0.1f32) } with withMockInput(Set#{keyA()});
     let expectedBallX = result#player#position#x + playerWidth() / 2.0f32 - ballRadiusConst();
     Assert.assertEq(expected = expectedBallX, result#ballPos#x)
 
@@ -301,7 +300,7 @@ def mkBrick(px: Float32, py: Float32, w: Float32, h: Float32, solid: Bool): Game
         color = {r = 1.0f32, g = 1.0f32, b = 1.0f32},
         isSolid = solid,
         destroyed = false,
-        textureKind = if (solid) BlockSolid else Block
+        texture = if (solid) "block_solid" else "block"
     }
 
 // 衝突なし: ボールがブリックから離れている

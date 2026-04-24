@@ -1,19 +1,18 @@
 // Game module — types, effects, constants, level parsing, and game logic
 
 mod Game {
-    pub enum TextureKind with Eq, ToString {
-        case Background
-        case Block
-        case BlockSolid
-        case Paddle
-        case Ball
-    }
-
     pub enum Direction with Eq, ToString {
         case Up
         case Right
         case Down
         case Left
+    }
+
+    pub enum GameEvent with Eq, ToString {
+        case BrickDestroyed(Int32)
+        case PaddleHit
+        case BallReset
+        case BallLaunched
     }
 
     pub type alias Vec2 = {x = Float32, y = Float32}
@@ -25,7 +24,7 @@ mod Game {
         color = Vec3,
         isSolid = Bool,
         destroyed = Bool,
-        textureKind = TextureKind
+        texture = String
     }
 
     pub type alias GameLevel = {
@@ -41,6 +40,8 @@ mod Game {
         ballRadius = Float32,
         ballStuck = Bool
     }
+
+    pub type alias TextureRegistry = Map[String, Int32]
 
     pub eff Game {
         def getInitialState(): GameState
@@ -66,6 +67,19 @@ mod Game {
     pub def keyA(): Int32 = 65
     pub def keyD(): Int32 = 68
     pub def keySpace(): Int32 = 32
+
+    // ========================================================================
+    // Texture Manifest (data-driven texture registration)
+    // ========================================================================
+
+    /// (name, path, hasAlpha) — add a line here for new textures
+    pub def textureManifest(): List[(String, String, Bool)] =
+        ("background", "textures/background.jpg", false) ::
+        ("block",      "textures/block.png",      true) ::
+        ("block_solid", "textures/block_solid.png", true) ::
+        ("paddle",     "textures/paddle.png",      true) ::
+        ("ball",       "textures/awesomeface.png", true) ::
+        Nil
 
     // ========================================================================
     // Level Parsing
@@ -121,7 +135,7 @@ mod Game {
                 color = tileColor(tileType),
                 isSolid = (tileType == 1),
                 destroyed = false,
-                textureKind = if (tileType == 1) TextureKind.BlockSolid else TextureKind.Block
+                texture = if (tileType == 1) "block_solid" else "block"
             })
         ))
 
@@ -156,7 +170,7 @@ mod Game {
             color = {r = 1.0f32, g = 1.0f32, b = 1.0f32},
             isSolid = true,
             destroyed = false,
-            textureKind = TextureKind.Paddle
+            texture = "paddle"
         };
 
         let ballX = playerX + playerWidth() / 2.0f32 - ballRadiusConst();
@@ -195,11 +209,18 @@ mod Game {
     /// 1フレームの更新を統合: 入力処理 → ボール移動 → 衝突処理 → リセット判定
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
-        let s1 = processInput(state, dt);
-        moveBall(s1, dt) |> doCollisions |> checkBallReset
+        let (s1, events1) = processInput(state, dt);
+        let (s2, events2) = moveBall(s1, dt) |> doCollisions;
+        let s3 = checkBallReset(s2);
+        let allEvents = List.append(events1, events2);
+        handleEvents(s3, allEvents)
+
+    /// イベントハンドラ（将来、スコア・サウンド・エフェクト等を追加）
+    def handleEvents(state: GameState, _events: List[GameEvent]): GameState =
+        state
 
     /// パドル移動 + ボール発射
-    pub def processInput(state: GameState, dt: Float32): GameState \ Game =
+    pub def processInput(state: GameState, dt: Float32): (GameState, List[GameEvent]) \ Game =
         let sw = Int32.toFloat32(screenWidth());
         let s1 = if (Game.isKeyPressed(keyA())) {
             let newX = Float32.max(0.0f32, state#player#position#x - playerVelocity() * dt);
@@ -220,8 +241,9 @@ mod Game {
             } else newState
         } else s1;
         if (Game.isKeyPressed(keySpace())) {
-            {ballStuck = false | s2}
-        } else s2
+            let events = if (s2#ballStuck) GameEvent.BallLaunched :: Nil else Nil;
+            ({ballStuck = false | s2}, events)
+        } else (s2, Nil)
 
     /// ボール物理: 移動 + 壁反射（純粋関数）
     pub def moveBall(state: GameState, dt: Float32): GameState =
@@ -297,59 +319,64 @@ mod Game {
         else
             (false, Direction.Up, {x = 0.0f32, y = 0.0f32})
 
-    /// 全衝突処理: ブリック衝突 → パドル衝突
-    def doCollisions(state: GameState): GameState =
-        if (state#ballStuck) state
-        else state |> doBrickCollisions |> doPaddleCollision
+    /// 全衝突処理: ブリック衝突 → パドル衝突（イベント付き）
+    def doCollisions(state: GameState): (GameState, List[GameEvent]) =
+        if (state#ballStuck) (state, Nil)
+        else {
+            let (s1, events1) = doBrickCollisions(state);
+            let (s2, events2) = doPaddleCollision(s1);
+            (s2, List.append(events1, events2))
+        }
 
     /// ブリック衝突処理: 各ブリックとの衝突を検出し、破壊+ボール反射
-    def doBrickCollisions(state: GameState): GameState =
+    def doBrickCollisions(state: GameState): (GameState, List[GameEvent]) =
         match List.nth(state#currentLevel, state#levels) {
-            case None => state
+            case None => (state, Nil)
             case Some(level) => {
                 let result = List.foldLeft(
                     (acc, brick) -> {
-                        let (bricks, bPos, bVel) = acc;
+                        let (bricks, bPos, bVel, events, idx) = acc;
                         if (brick#destroyed)
-                            (brick :: bricks, bPos, bVel)
+                            (brick :: bricks, bPos, bVel, events, idx + 1)
                         else {
                             let (collision, dir, diff) = checkCollisionCircleAABB(bPos, state#ballRadius, brick);
                             if (not collision)
-                                (brick :: bricks, bPos, bVel)
+                                (brick :: bricks, bPos, bVel, events, idx + 1)
                             else {
                                 let newBrick = if (brick#isSolid) brick else {destroyed = true | brick};
+                                let newEvents = if (brick#isSolid) events else GameEvent.BrickDestroyed(idx) :: events;
                                 let horizontal = (dir == Direction.Left) or (dir == Direction.Right);
                                 if (horizontal) {
                                     let newVx = -1.0f32 * bVel#x;
                                     let penetration = state#ballRadius - Float32.abs(diff#x);
                                     let newX = if (dir == Direction.Left) bPos#x + penetration else bPos#x - penetration;
-                                    (newBrick :: bricks, {x = newX, y = bPos#y}, {x = newVx, y = bVel#y})
+                                    (newBrick :: bricks, {x = newX, y = bPos#y}, {x = newVx, y = bVel#y}, newEvents, idx + 1)
                                 } else {
                                     let newVy = -1.0f32 * bVel#y;
                                     let penetration = state#ballRadius - Float32.abs(diff#y);
                                     let newY = if (dir == Direction.Up) bPos#y - penetration else bPos#y + penetration;
-                                    (newBrick :: bricks, {x = bPos#x, y = newY}, {x = bVel#x, y = newVy})
+                                    (newBrick :: bricks, {x = bPos#x, y = newY}, {x = bVel#x, y = newVy}, newEvents, idx + 1)
                                 }
                             }
                         }
                     },
-                    (Nil, state#ballPos, state#ballVelocity),
+                    (Nil, state#ballPos, state#ballVelocity, Nil, 0),
                     level#bricks
                 );
-                let (newBricks, newBallPos, newBallVel) = result;
+                let (newBricks, newBallPos, newBallVel, events, _) = result;
                 let fixedBricks = List.reverse(newBricks);
                 let newLevel = {bricks = fixedBricks};
                 let newLevels = state#levels |> List.zipWithIndex |> List.map(match (i, lvl) ->
                     if (i == state#currentLevel) newLevel else lvl
                 );
-                {levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state}
+                ({levels = newLevels, ballPos = newBallPos, ballVelocity = newBallVel | state}, List.reverse(events))
             }
         }
 
     /// パドル衝突処理: 打ち返し角度をヒット位置に基づき調整
-    def doPaddleCollision(state: GameState): GameState =
+    def doPaddleCollision(state: GameState): (GameState, List[GameEvent]) =
         let (collision, _, _) = checkCollisionCircleAABB(state#ballPos, state#ballRadius, state#player);
-        if (not collision) state
+        if (not collision) (state, Nil)
         else {
             let centerBoard = state#player#position#x + state#player#size#x / 2.0f32;
             let distance = (state#ballPos#x + state#ballRadius) - centerBoard;
@@ -363,6 +390,6 @@ mod Game {
             let len = sqrt32(newVx * newVx + newVy * newVy);
             let finalVx = if (len > 0.0f32) newVx / len * speed else newVx;
             let finalVy = if (len > 0.0f32) newVy / len * speed else newVy;
-            {ballVelocity = {x = finalVx, y = finalVy} | state}
+            ({ballVelocity = {x = finalVx, y = finalVy} | state}, GameEvent.PaddleHit :: Nil)
         }
 }
