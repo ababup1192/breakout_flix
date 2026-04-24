@@ -13,6 +13,7 @@ mod Game {
         case PaddleHit
         case BallReset
         case BallLaunched
+        case SolidBrickHit
     }
 
     pub type alias Vec2 = {x = Float32, y = Float32}
@@ -38,7 +39,8 @@ mod Game {
         ballPos = Vec2,
         ballVelocity = Vec2,
         ballRadius = Float32,
-        ballStuck = Bool
+        ballStuck = Bool,
+        shakeTime = Float32
     }
 
     type alias BrickFoldAcc = (List[GameObject], Vec2, Vec2, List[GameEvent], Int32)
@@ -185,7 +187,8 @@ mod Game {
             ballPos = {x = ballX, y = ballY},
             ballVelocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
             ballRadius = ballRadiusConst(),
-            ballStuck = true
+            ballStuck = true,
+            shakeTime = 0.0f32
         }
 
     // ========================================================================
@@ -209,7 +212,7 @@ mod Game {
     // Game Logic — per-frame update
     // ========================================================================
 
-    /// 1フレームの更新を統合: 入力処理 → ボール移動 → 衝突処理 → リセット判定
+    /// 1フレームの更新を統合: 入力処理 → ボール移動 → 衝突処理 → リセット判定 → シェイク減衰
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
         let (finalState, allEvents) = GameAction.unpack(forM (
@@ -217,11 +220,20 @@ mod Game {
             s2 <- doCollisions(moveBall(s1, dt));
             s3 <- checkBallReset(s2)
         ) yield s3);
-        handleEvents(finalState, allEvents)
+        tickShake(handleEvents(finalState, allEvents), dt)
 
-    /// イベントハンドラ（将来、スコア・サウンド・エフェクト等を追加）
-    def handleEvents(state: GameState, _events: List[GameEvent]): GameState =
-        state
+    /// イベントハンドラ: SolidBrickHitでシェイクを開始
+    pub def handleEvents(state: GameState, events: List[GameEvent]): GameState =
+        List.foldLeft((s, event) -> match event {
+            case GameEvent.SolidBrickHit => {shakeTime = 0.15f32 | s}
+            case _ => s
+        }, state, events)
+
+    /// シェイクタイマーを減衰（毎フレーム呼ぶ）
+    pub def tickShake(state: GameState, dt: Float32): GameState =
+        if (state#shakeTime > 0.0f32)
+            {shakeTime = Float32.max(0.0f32, state#shakeTime - dt) | state}
+        else state
 
     /// パドルを dx だけ移動（ボールが貼り付いていればボールも追従）
     def movePlayer(state: GameState, dx: Float32): GameState =
@@ -348,7 +360,8 @@ mod Game {
                 (brick :: bricks, bPos, bVel, events, idx + 1)
             else {
                 let newBrick = if (brick#isSolid) brick else {destroyed = true | brick};
-                let newEvents = if (brick#isSolid) events else GameEvent.BrickDestroyed(idx) :: events;
+                let newEvents = if (brick#isSolid) GameEvent.SolidBrickHit :: events
+                                else GameEvent.BrickDestroyed(idx) :: events;
                 let (newPos, newVel) = reflectBall(bPos, bVel, radius, dir, diff);
                 (newBrick :: bricks, newPos, newVel, newEvents, idx + 1)
             }

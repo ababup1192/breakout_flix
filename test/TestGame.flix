@@ -7,7 +7,9 @@ use Game.{parseLevelLine, parseLevel, initGame,
           initialBallVelocityX, initialBallVelocityY,
           moveBall, checkBallReset, processInput,
           keyA, keyD, keySpace,
-          vectorDirection, checkCollisionCircleAABB}
+          vectorDirection, checkCollisionCircleAABB,
+          handleEvents, tickShake}
+use Game.GameEvent
 
 // --- parseLevelLine ---
 
@@ -134,6 +136,15 @@ def mkTestState(
     vx: Float32, vy: Float32,
     stuck: Bool
 ): Game.GameState =
+    mkTestStateWithShake(px, py, bx, by, vx, vy, stuck, 0.0f32)
+
+def mkTestStateWithShake(
+    px: Float32, py: Float32,
+    bx: Float32, by: Float32,
+    vx: Float32, vy: Float32,
+    stuck: Bool,
+    shake: Float32
+): Game.GameState =
     {
         levels = Nil,
         currentLevel = 0,
@@ -148,7 +159,8 @@ def mkTestState(
         ballPos = {x = bx, y = by},
         ballVelocity = {x = vx, y = vy},
         ballRadius = ballRadiusConst(),
-        ballStuck = stuck
+        ballStuck = stuck,
+        shakeTime = shake
     }
 
 // 固定時は動かない
@@ -360,3 +372,42 @@ def testCollisionBarelyMiss(): Unit \ Assert =
     // Ball center at (125, 100 - 12.5 - 0.1) = ballPos.y = 100 - 25.1 = 74.9
     let (collision, _, _) = checkCollisionCircleAABB({x = 112.5f32, y = 74.9f32}, 12.5f32, brick);
     Assert.assertFalse(collision)
+
+// --- handleEvents ---
+
+// SolidBrickHit → shakeTime が 0.15 にセットされる
+@Test
+def testHandleEventsSolidBrickHit(): Unit \ Assert =
+    let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
+    let result = handleEvents(state, GameEvent.SolidBrickHit :: Nil);
+    Assert.assertEq(expected = 0.15f32, result#shakeTime)
+
+// 他のイベントでは shakeTime は変わらない
+@Test
+def testHandleEventsOtherEvent(): Unit \ Assert =
+    let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
+    let result = handleEvents(state, GameEvent.PaddleHit :: Nil);
+    Assert.assertEq(expected = 0.0f32, result#shakeTime)
+
+// --- tickShake ---
+
+// shakeTime > 0 → dt 分だけ減少する
+@Test
+def testTickShakeDecay(): Unit \ Assert =
+    let state = mkTestStateWithShake(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true, 0.15f32);
+    let result = tickShake(state, 0.05f32);
+    Assert.assertTrue(result#shakeTime > 0.09f32 and result#shakeTime < 0.11f32)
+
+// shakeTime がゼロ以下にならない（クランプ）
+@Test
+def testTickShakeClampToZero(): Unit \ Assert =
+    let state = mkTestStateWithShake(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true, 0.02f32);
+    let result = tickShake(state, 0.05f32);
+    Assert.assertEq(expected = 0.0f32, result#shakeTime)
+
+// shakeTime == 0 → 変化なし
+@Test
+def testTickShakeAlreadyZero(): Unit \ Assert =
+    let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
+    let result = tickShake(state, 0.016f32);
+    Assert.assertEq(expected = 0.0f32, result#shakeTime)
