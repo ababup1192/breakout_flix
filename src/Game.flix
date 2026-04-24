@@ -80,9 +80,10 @@ mod Game {
 
     /// レベルデータ文字列をパースし、ブリックのGameObjectリストに変換
     pub def parseLevel(data: String, levelWidth: Int32, levelHeight: Int32): GameLevel =
-        let lines = String.split({regex = "\n"}, data);
-        let rows = List.map(parseLevelLine, lines);
-        let validRows = List.filter(row -> not List.isEmpty(row), rows);
+        let validRows = data
+            |> String.split({regex = "\n"})
+            |> List.map(parseLevelLine)
+            |> List.filter(row -> not List.isEmpty(row));
         let numRows = List.length(validRows);
         let numCols = List.head(validRows) |> Option.map(List.length) |> Option.getWithDefault(0);
 
@@ -183,8 +184,7 @@ mod Game {
     def runLoop(state: GameState): GameState \ Game =
         if (Game.shouldClose()) state
         else {
-            let newState = updateGame(state);
-            Game.render(newState);
+            let newState = updateGame(state) !> Game.render;
             runLoop(newState)
         }
 
@@ -196,9 +196,7 @@ mod Game {
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
         let s1 = processInput(state, dt);
-        let s2 = moveBall(s1, dt);
-        let s3 = doCollisions(s2);
-        checkBallReset(s3)
+        moveBall(s1, dt) |> doCollisions |> checkBallReset
 
     /// パドル移動 + ボール発射
     pub def processInput(state: GameState, dt: Float32): GameState \ Game =
@@ -302,10 +300,7 @@ mod Game {
     /// 全衝突処理: ブリック衝突 → パドル衝突
     def doCollisions(state: GameState): GameState =
         if (state#ballStuck) state
-        else {
-            let s1 = doBrickCollisions(state);
-            doPaddleCollision(s1)
-        }
+        else state |> doBrickCollisions |> doPaddleCollision
 
     /// ブリック衝突処理: 各ブリックとの衝突を検出し、破壊+ボール反射
     def doBrickCollisions(state: GameState): GameState =
