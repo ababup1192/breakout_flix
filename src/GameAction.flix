@@ -41,4 +41,12 @@ mod GameAction {
             let GameAction(b, e2) = f(a);
             GameAction(b, List.append(e1, e2))
     }
+
+    pub def foldSignals(f: (a, s) -> GameAction[s],
+                        state: s,
+                        signals: List[a]): GameAction[s] =
+        List.foldLeft((acc, sig) -> forM (
+            s <- acc;
+            s2 <- f(sig, s)
+        ) yield s2, pure(state), signals)
 }

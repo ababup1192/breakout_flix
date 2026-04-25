@@ -20,11 +20,11 @@ mod BreakoutScene {
             let idxStr = Int32.toString(idx);
             SceneTree.staticBody2D(
                 "Brick_${idxStr}",
-                {position = brick#position, scale = Vec2D.one()},
+                brick#position,
                 {isSolid = brick#isSolid, destroyed = false},
                 SceneTree.sprite2D(
                     "BrickSprite_${idxStr}",
-                    SceneTree.identityTransform(),
+                    Vec2D.zero(),
                     {size = brick#size, color = brick#color, texture = brick#texture, visible = true}
                 ) ::
                 SceneTree.collisionShape2D(
@@ -33,7 +33,7 @@ mod BreakoutScene {
                 ) :: Nil
             )
         );
-        SceneTree.node2D(bricksName(), SceneTree.identityTransform(), brickNodes)
+        SceneTree.node2D(bricksName(), Vec2D.zero(), brickNodes)
 
     pub def buildInitialScene(width: Int32, height: Int32, level: Game.LevelData): SceneTree.Node =
         let sw = Int32.toFloat32(width);
@@ -44,18 +44,18 @@ mod BreakoutScene {
         let ballY = playerY - Game.ballRadiusConst() * 2.0f32;
         let ballDiam = Game.ballRadiusConst() * 2.0f32;
 
-        SceneTree.node2D(rootName(), SceneTree.identityTransform(),
+        SceneTree.node2D(rootName(), Vec2D.zero(),
             SceneTree.sprite2D("Background",
-                SceneTree.identityTransform(),
+                Vec2D.zero(),
                 {size = {x = sw, y = sh}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "background", visible = true}
             ) ::
             buildBrickSubtree(level)
             ::
             SceneTree.kinematicBody2D(paddleName(),
-                {position = {x = playerX, y = playerY}, scale = Vec2D.one()},
+                {x = playerX, y = playerY},
                 {velocity = Vec2D.zero()},
                 SceneTree.sprite2D("PaddleSprite",
-                    SceneTree.identityTransform(),
+                    Vec2D.zero(),
                     {size = {x = Game.playerWidth(), y = Game.playerHeight()}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "paddle", visible = true}
                 ) ::
                 SceneTree.collisionShape2D("PaddleCollider",
@@ -64,10 +64,10 @@ mod BreakoutScene {
             )
             ::
             SceneTree.rigidBody2D(ballName(),
-                {position = {x = ballX, y = ballY}, scale = Vec2D.one()},
+                {x = ballX, y = ballY},
                 {velocity = {x = Game.initialBallVelocityX(), y = Game.initialBallVelocityY()}, stuck = true},
                 SceneTree.sprite2D("BallSprite",
-                    SceneTree.identityTransform(),
+                    Vec2D.zero(),
                     {size = {x = ballDiam, y = ballDiam}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "ball", visible = true}
                 ) ::
                 SceneTree.collisionShape2D("BallCollider",
@@ -76,7 +76,7 @@ mod BreakoutScene {
             )
             ::
             SceneTree.area2D(deathZoneName(),
-                {position = {x = 0.0f32, y = sh}, scale = Vec2D.one()},
+                {x = 0.0f32, y = sh},
                 SceneTree.collisionShape2D("DeathZoneShape",
                     SceneTree.CollisionShapeData.RectShape({x = sw, y = 20.0f32})
                 ) :: Nil
@@ -109,7 +109,7 @@ mod BreakoutScene {
             case Some(n) =>
                 let bd = SceneTree.rigidBodyData(n);
                 {
-                    pos = (SceneTree.nodeTransform(n))#position,
+                    pos = SceneTree.nodePosition(n),
                     vel = bd |> Option.map(b -> b#velocity) |> Option.getWithDefault(Vec2D.zero()),
                     radius = SceneTree.findCircleShape(SceneTree.nodeChildren(n)) |> Option.getWithDefault(Game.ballRadiusConst()),
                     stuck = bd |> Option.map(b -> b#stuck) |> Option.getWithDefault(true)
@@ -120,7 +120,7 @@ mod BreakoutScene {
     pub def paddleSnapshot(scene: SceneTree.Node): PaddleSnapshot =
         match SceneTree.findNode(paddleName(), scene) {
             case Some(n) => {
-                pos = (SceneTree.nodeTransform(n))#position,
+                pos = SceneTree.nodePosition(n),
                 size = SceneTree.findRectShape(SceneTree.nodeChildren(n))
                     |> Option.getWithDefault({x = Game.playerWidth(), y = Game.playerHeight()})
             }
@@ -150,7 +150,7 @@ mod BreakoutScene {
 
     pub def deathZoneY(scene: SceneTree.Node): Float32 =
         SceneTree.findNode(deathZoneName(), scene)
-            |> Option.map(n -> (SceneTree.nodeTransform(n))#position#y)
+            |> Option.map(n -> (SceneTree.nodePosition(n))#y)
             |> Option.getWithDefault(Int32.toFloat32(Game.screenHeight()))
 
     // ========================================================================
@@ -174,7 +174,7 @@ mod BreakoutScene {
         SceneTree.updateRigidBody(ballName(), f, scene)
 
     pub def replaceBricks(bricks: List[SceneTree.Node], scene: SceneTree.Node): SceneTree.Node =
-        let newBricksNode = SceneTree.node2D(bricksName(), SceneTree.identityTransform(), bricks);
+        let newBricksNode = SceneTree.node2D(bricksName(), Vec2D.zero(), bricks);
         SceneTree.mapNode(bricksName(), _ -> newBricksNode, scene)
 
     // ========================================================================
@@ -185,16 +185,13 @@ mod BreakoutScene {
 
     pub def brickRect(brickNode: SceneTree.Node): BrickRect =
         {
-            pos = (SceneTree.nodeTransform(brickNode))#position,
+            pos = SceneTree.nodePosition(brickNode),
             size = SceneTree.findRectShape(SceneTree.nodeChildren(brickNode))
                 |> Option.getWithDefault(Vec2D.zero())
         }
 
     pub def brickBodyData(brickNode: SceneTree.Node): Option[SceneTree.StaticBodyData] =
         SceneTree.staticBodyData(brickNode)
-
-    pub def destroyBrick(bodyData: SceneTree.StaticBodyData, brickNode: SceneTree.Node): SceneTree.Node =
-        SceneTree.modifyStaticBody(_ -> {destroyed = true | bodyData}, brickNode)
 
     // ========================================================================
     // Physics Step
@@ -209,8 +206,8 @@ mod BreakoutScene {
         };
         SceneTree.physicsStep(scene, dt, config)
 
-    pub def destroyBrickByName(name: String, scene: SceneTree.Node): SceneTree.Node =
-        SceneTree.updateStaticBody(name, bd -> {destroyed = true | bd}, scene)
+    pub def destroyBrick(blick: SceneTree.BodyContact, scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.updateStaticBody(blick#name, bd -> {destroyed = true | bd}, scene)
 
     // ========================================================================
     // Rendering: apply shake offset

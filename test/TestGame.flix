@@ -115,12 +115,12 @@ def mkTestStateWithShake(
     stuck: Bool,
     shake: Float32
 ): Game.GameState =
-    let scene = SceneTree.node2D("Root", SceneTree.identityTransform(),
-        SceneTree.node2D("Bricks", SceneTree.identityTransform(), Nil) ::
+    let scene = SceneTree.node2D("Root", Vec2D.zero(),
+        SceneTree.node2D("Bricks", Vec2D.zero(), Nil) ::
         SceneTree.kinematicBody2D("Paddle",
-            {position = {x = px, y = py}, scale = Vec2D.one()},
+            {x = px, y = py},
             {velocity = Vec2D.zero()},
-            SceneTree.sprite2D("PaddleSprite", SceneTree.identityTransform(),
+            SceneTree.sprite2D("PaddleSprite", Vec2D.zero(),
                 {size = {x = playerWidth(), y = playerHeight()}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "paddle", visible = true}
             ) ::
             SceneTree.collisionShape2D("PaddleCollider",
@@ -128,9 +128,9 @@ def mkTestStateWithShake(
             ) :: Nil
         ) ::
         SceneTree.rigidBody2D("Ball",
-            {position = {x = bx, y = by}, scale = Vec2D.one()},
+            {x = bx, y = by},
             {velocity = {x = vx, y = vy}, stuck = stuck},
-            SceneTree.sprite2D("BallSprite", SceneTree.identityTransform(),
+            SceneTree.sprite2D("BallSprite", Vec2D.zero(),
                 {size = {x = ballRadiusConst() * 2.0f32, y = ballRadiusConst() * 2.0f32},
                  color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "ball", visible = true}
             ) ::
@@ -139,7 +139,7 @@ def mkTestStateWithShake(
             ) :: Nil
         ) ::
         SceneTree.area2D("DeathZone",
-            {position = {x = 0.0f32, y = Int32.toFloat32(screenHeight())}, scale = Vec2D.one()},
+            {x = 0.0f32, y = Int32.toFloat32(screenHeight())},
             SceneTree.collisionShape2D("DeathZoneShape",
                 SceneTree.CollisionShapeData.RectShape({x = Int32.toFloat32(screenWidth()), y = 20.0f32})
             ) :: Nil

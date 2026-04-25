@@ -2,7 +2,7 @@
 
 mod Game {
     pub enum GameEvent with Eq, ToString {
-        case BrickDestroyed(Int32)
+        case BrickDestroyed
         case PaddleHit
         case BallReset
         case BallLaunched
@@ -177,7 +177,8 @@ mod Game {
         let screenSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())};
         let result = BreakoutScene.physicsStep(s1#scene, dt, screenSize);
         let s2 = {scene = result#root | s1};
-        let (s3, allEvents) = GameAction.unpack(processCollisions(result#collisions, s2));
+        let (s3, allEvents) = GameAction.unpack(
+            GameAction.foldSignals(onSignal, s2, result#signals));
         tickShake(handleEvents(s3, allEvents), dt)
 
     pub def handleEvents(state: GameState, events: List[GameEvent]): GameState =
@@ -205,81 +206,48 @@ mod Game {
         } else s1
 
     // ========================================================================
-    // Hitbox Handlers (Godot node scripts)
+    // Signal Handlers (Godot _on_*_entered style)
     // ========================================================================
 
-    // Paddle.gd: _on_hit_box_area_entered(area)
-    def onPaddleHitBoxAreaEntered(area: SceneTree.Node, areaPos: Vec2D.Vec2,
-                                   state: GameState): GameAction.GameAction[GameState] =
-        let self = BreakoutScene.paddleSnapshot(state#scene);
-        let radius = SceneTree.findCircleShape(SceneTree.nodeChildren(area))
-            |> Option.getWithDefault(ballRadiusConst());
-        let vel = SceneTree.rigidBodyData(area)
-            |> Option.map(bd -> bd#velocity)
-            |> Option.getWithDefault(Vec2D.zero());
-        let center = self#pos#x + self#size#x / 2.0f32;
-        let distance = (areaPos#x + radius) - center;
-        let percentage = distance / (self#size#x / 2.0f32);
-        let strength = 2.0f32;
-        let speed = Vec2D.length(vel);
-        let newVx = initialBallVelocityX() * percentage * strength;
-        let newVy = -1.0f32 * Float32.abs(vel#y);
-        let newVel = Vec2D.mul(Vec2D.normalized({x = newVx, y = newVy}), speed);
-        let scene1 = BreakoutScene.setBallVelocity(newVel, state#scene);
-        GameAction.of({scene = scene1 | state}, GameEvent.PaddleHit :: Nil)
-
-    // Brick.gd: _on_hit_box_area_entered(area)
-    def onBrickHitBoxAreaEntered(area: SceneTree.Node, areaPos: Vec2D.Vec2,
-                                  bd: SceneTree.StaticBodyData, brickName: String,
-                                  dir: SceneTree.Direction, diff: Vec2D.Vec2,
-                                  state: GameState): GameAction.GameAction[GameState] =
-        let radius = SceneTree.findCircleShape(SceneTree.nodeChildren(area))
-            |> Option.getWithDefault(ballRadiusConst());
-        let vel = SceneTree.rigidBodyData(area)
-            |> Option.map(b -> b#velocity)
-            |> Option.getWithDefault(Vec2D.zero());
-        let (newPos, newVel) = SceneTree.resolveCollision(areaPos, vel, radius, dir, diff);
-        let scene1 = BreakoutScene.setBallPosition(newPos,
-            BreakoutScene.setBallVelocity(newVel, state#scene));
-        let scene2 = if (bd#isSolid) scene1
-            else BreakoutScene.destroyBrickByName(brickName, scene1);
-        let event = if (bd#isSolid) GameEvent.SolidBrickHit
-            else GameEvent.BrickDestroyed(0);
-        GameAction.of({scene = scene2 | state}, event :: Nil)
-
-    // DeathZone.gd: _on_body_entered(area)
-    def onDeathZoneBodyEntered(_area: SceneTree.Node,
-                                state: GameState): GameAction.GameAction[GameState] =
-        let scene1 = BreakoutScene.updateBall(
-            _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
-                  stuck = true}, state#scene);
-        GameAction.of({scene = scene1 | state}, GameEvent.BallReset :: Nil)
-
-    // ========================================================================
-    // Signal Routing (Godot engine internals)
-    // ========================================================================
-
-    def routeCollision(event: SceneTree.CollisionEvent,
-                        state: GameState): GameAction.GameAction[GameState] =
-        let area = event#area;
-        let areaPos = event#areaGlobalPos;
-        match event#targetName {
-            case "Paddle" =>
-                onPaddleHitBoxAreaEntered(area, areaPos, state)
-            case "DeathZone" =>
-                onDeathZoneBodyEntered(area, state)
-            case _ => match event#targetKind {
-                case SceneTree.NodeKind.Fixed(bd) =>
-                    onBrickHitBoxAreaEntered(area, areaPos, bd, event#targetName,
-                        event#direction, event#diff, state)
-                case _ => GameAction.pure(state)
+    def onSignal(sig: SceneTree.NodeSignal,
+                 state: GameState): GameAction.GameAction[GameState] =
+        match sig#nodeName {
+            case "Ball" => match sig#signal {
+                case SceneTree.Signal.BodyEntered(body) =>
+                    onBallBodyEntered(sig#selfPosition, body, state)
+                case SceneTree.Signal.AreaEntered(body) =>
+                    onBallAreaEntered(body, state)
             }
+            case _ => GameAction.pure(state)
         }
 
-    def processCollisions(collisions: List[SceneTree.CollisionEvent],
-                           state: GameState): GameAction.GameAction[GameState] =
-        List.foldLeft((acc, event) -> forM (
-            s <- acc;
-            s2 <- routeCollision(event, s)
-        ) yield s2, GameAction.pure(state), collisions)
+    def onBallBodyEntered(selfPos: Vec2D.Vec2, body: SceneTree.BodyContact,
+                          state: GameState): GameAction.GameAction[GameState] =
+        match body#name {
+            case "Paddle" =>
+                let ball = BreakoutScene.ballSnapshot(state#scene);
+                let direction = Vec2D.normalized(Vec2D.sub(selfPos, body#position));
+                let speed = Vec2D.length(ball#vel);
+                let newVel = Vec2D.mul(direction, speed);
+                let scene1 = BreakoutScene.setBallVelocity(newVel, state#scene);
+                GameAction.of({scene = scene1 | state}, GameEvent.PaddleHit :: Nil)
+            case _ if body#group == "Bricks" =>
+                let scene = if (body#isSolid) state#scene
+                    else BreakoutScene.destroyBrick(body, state#scene);
+                let event = if (body#isSolid) GameEvent.SolidBrickHit
+                    else GameEvent.BrickDestroyed;
+                GameAction.of({scene = scene | state}, event :: Nil)
+            case _ => GameAction.pure(state)
+        }
+
+    def onBallAreaEntered(body: SceneTree.BodyContact,
+                          state: GameState): GameAction.GameAction[GameState] =
+        match body#name {
+            case "DeathZone" =>
+                let scene1 = BreakoutScene.updateBall(
+                    _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
+                          stuck = true}, state#scene);
+                GameAction.of({scene = scene1 | state}, GameEvent.BallReset :: Nil)
+            case _ => GameAction.pure(state)
+        }
 }

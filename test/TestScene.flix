@@ -1,20 +1,20 @@
 // Tests for SceneTree — coordinate accumulation, draw order, utilities, and engine
 
-use SceneTree.{identityTransform, collectDrawables,
+use SceneTree.{collectDrawables,
                node2D, sprite2D, collisionShape2D, kinematicBody2D, staticBody2D, rigidBody2D, area2D}
 
 def mkSpriteData(tex: String): SceneTree.SpriteData =
     {size = {x = 10.0f32, y = 10.0f32}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = tex, visible = true}
 
-def mkTransform(px: Float32, py: Float32): SceneTree.Transform2D =
-    {position = {x = px, y = py}, scale = {x = 1.0f32, y = 1.0f32}}
+def mkPos(px: Float32, py: Float32): Vec2D.Vec2 =
+    {x = px, y = py}
 
 // --- 座標加算 ---
 
 @Test
 def testPositionAccumulation(): Unit \ Assert =
-    let node = node2D("Parent", mkTransform(100.0f32, 50.0f32),
-        sprite2D("Child", mkTransform(10.0f32, 5.0f32), mkSpriteData("block")) :: Nil
+    let node = node2D("Parent", mkPos(100.0f32, 50.0f32),
+        sprite2D("Child", mkPos(10.0f32, 5.0f32), mkSpriteData("block")) :: Nil
     );
     let result = collectDrawables(node, {x = 0.0f32, y = 0.0f32});
     let posX = List.head(result) |> Option.map(match (_, p) -> p#x);
@@ -24,9 +24,9 @@ def testPositionAccumulation(): Unit \ Assert =
 
 @Test
 def testNestedPositionAccumulation(): Unit \ Assert =
-    let leaf = sprite2D("Leaf", mkTransform(5.0f32, 5.0f32), mkSpriteData("ball"));
-    let inner = node2D("Inner", mkTransform(20.0f32, 30.0f32), leaf :: Nil);
-    let outer = node2D("Outer", mkTransform(100.0f32, 200.0f32), inner :: Nil);
+    let leaf = sprite2D("Leaf", mkPos(5.0f32, 5.0f32), mkSpriteData("ball"));
+    let inner = node2D("Inner", mkPos(20.0f32, 30.0f32), leaf :: Nil);
+    let outer = node2D("Outer", mkPos(100.0f32, 200.0f32), inner :: Nil);
     let result = collectDrawables(outer, {x = 1.0f32, y = 2.0f32});
     let posX = List.head(result) |> Option.map(match (_, p) -> p#x);
     let posY = List.head(result) |> Option.map(match (_, p) -> p#y);
@@ -36,7 +36,7 @@ def testNestedPositionAccumulation(): Unit \ Assert =
 @Test
 def testInvisibleSpriteSkipped(): Unit \ Assert =
     let sd = {size = {x = 10.0f32, y = 10.0f32}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "block", visible = false};
-    let node = sprite2D("Hidden", identityTransform(), sd);
+    let node = sprite2D("Hidden", Vec2D.zero(), sd);
     let result = collectDrawables(node, {x = 0.0f32, y = 0.0f32});
     Assert.assertEq(expected = 0, List.length(result))
 
@@ -44,10 +44,10 @@ def testInvisibleSpriteSkipped(): Unit \ Assert =
 
 @Test
 def testDrawOrder(): Unit \ Assert =
-    let node = node2D("Root", identityTransform(),
-        sprite2D("BG", identityTransform(), mkSpriteData("background")) ::
-        sprite2D("Block", identityTransform(), mkSpriteData("block")) ::
-        sprite2D("Paddle", identityTransform(), mkSpriteData("paddle")) ::
+    let node = node2D("Root", Vec2D.zero(),
+        sprite2D("BG", Vec2D.zero(), mkSpriteData("background")) ::
+        sprite2D("Block", Vec2D.zero(), mkSpriteData("block")) ::
+        sprite2D("Paddle", Vec2D.zero(), mkSpriteData("paddle")) ::
         Nil
     );
     let textures = collectDrawables(node, {x = 0.0f32, y = 0.0f32})
@@ -56,15 +56,15 @@ def testDrawOrder(): Unit \ Assert =
 
 @Test
 def testDrawOrderWithNestedGroup(): Unit \ Assert =
-    let bricks = node2D("Bricks", identityTransform(),
-        sprite2D("B1", identityTransform(), mkSpriteData("block")) ::
-        sprite2D("B2", identityTransform(), mkSpriteData("block_solid")) ::
+    let bricks = node2D("Bricks", Vec2D.zero(),
+        sprite2D("B1", Vec2D.zero(), mkSpriteData("block")) ::
+        sprite2D("B2", Vec2D.zero(), mkSpriteData("block_solid")) ::
         Nil
     );
-    let root = node2D("Root", identityTransform(),
-        sprite2D("BG", identityTransform(), mkSpriteData("background")) ::
+    let root = node2D("Root", Vec2D.zero(),
+        sprite2D("BG", Vec2D.zero(), mkSpriteData("background")) ::
         bricks ::
-        sprite2D("Paddle", identityTransform(), mkSpriteData("paddle")) ::
+        sprite2D("Paddle", Vec2D.zero(), mkSpriteData("paddle")) ::
         Nil
     );
     let textures = collectDrawables(root, {x = 0.0f32, y = 0.0f32})
@@ -75,11 +75,11 @@ def testDrawOrderWithNestedGroup(): Unit \ Assert =
 
 @Test
 def testDestroyedStaticBodySkipped(): Unit \ Assert =
-    let brick = staticBody2D("Brick", mkTransform(10.0f32, 10.0f32),
+    let brick = staticBody2D("Brick", mkPos(10.0f32, 10.0f32),
         {isSolid = false, destroyed = true},
-        sprite2D("BrickSprite", identityTransform(), mkSpriteData("block")) :: Nil
+        sprite2D("BrickSprite", Vec2D.zero(), mkSpriteData("block")) :: Nil
     );
-    let root = node2D("Root", identityTransform(), brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), brick :: Nil);
     let result = collectDrawables(root, Vec2D.zero());
     Assert.assertEq(expected = 0, List.length(result))
 
@@ -87,9 +87,9 @@ def testDestroyedStaticBodySkipped(): Unit \ Assert =
 
 @Test
 def testKinematicBodyChildDrawable(): Unit \ Assert =
-    let paddle = kinematicBody2D("Paddle", mkTransform(100.0f32, 200.0f32),
+    let paddle = kinematicBody2D("Paddle", mkPos(100.0f32, 200.0f32),
         {velocity = Vec2D.zero()},
-        sprite2D("PaddleSprite", identityTransform(), mkSpriteData("paddle")) :: Nil
+        sprite2D("PaddleSprite", Vec2D.zero(), mkSpriteData("paddle")) :: Nil
     );
     let result = collectDrawables(paddle, Vec2D.zero());
     Assert.assertEq(expected = 1, List.length(result));
@@ -100,20 +100,20 @@ def testKinematicBodyChildDrawable(): Unit \ Assert =
 
 @Test
 def testFindNodeRoot(): Unit \ Assert =
-    let root = node2D("Root", identityTransform(), Nil);
+    let root = node2D("Root", Vec2D.zero(), Nil);
     let found = SceneTree.findNode("Root", root) |> Option.map(SceneTree.nodeName);
     Assert.assertEq(expected = Some("Root"), found)
 
 @Test
 def testFindNodeNested(): Unit \ Assert =
-    let child = sprite2D("Ball", identityTransform(), mkSpriteData("ball"));
-    let root = node2D("Root", identityTransform(), child :: Nil);
+    let child = sprite2D("Ball", Vec2D.zero(), mkSpriteData("ball"));
+    let root = node2D("Root", Vec2D.zero(), child :: Nil);
     let found = SceneTree.findNode("Ball", root) |> Option.map(SceneTree.nodeName);
     Assert.assertEq(expected = Some("Ball"), found)
 
 @Test
 def testFindNodeMissing(): Unit \ Assert =
-    let root = node2D("Root", identityTransform(), Nil);
+    let root = node2D("Root", Vec2D.zero(), Nil);
     let found = SceneTree.findNode("Missing", root);
     Assert.assertTrue(Option.isEmpty(found))
 
@@ -121,11 +121,11 @@ def testFindNodeMissing(): Unit \ Assert =
 
 @Test
 def testMapNodeModifiesTarget(): Unit \ Assert =
-    let root = node2D("Root", identityTransform(),
-        sprite2D("Ball", mkTransform(10.0f32, 20.0f32), mkSpriteData("ball")) :: Nil
+    let root = node2D("Root", Vec2D.zero(),
+        sprite2D("Ball", mkPos(10.0f32, 20.0f32), mkSpriteData("ball")) :: Nil
     );
     let updated = SceneTree.mapNode("Ball", _ ->
-        sprite2D("Ball", mkTransform(99.0f32, 99.0f32), mkSpriteData("ball")),
+        sprite2D("Ball", mkPos(99.0f32, 99.0f32), mkSpriteData("ball")),
         root
     );
     let pos = SceneTree.globalPosition("Ball", updated);
@@ -136,8 +136,8 @@ def testMapNodeModifiesTarget(): Unit \ Assert =
 
 @Test
 def testGlobalPositionNested(): Unit \ Assert =
-    let child = sprite2D("Ball", mkTransform(10.0f32, 20.0f32), mkSpriteData("ball"));
-    let parent = node2D("Root", mkTransform(100.0f32, 200.0f32), child :: Nil);
+    let child = sprite2D("Ball", mkPos(10.0f32, 20.0f32), mkSpriteData("ball"));
+    let parent = node2D("Root", mkPos(100.0f32, 200.0f32), child :: Nil);
     let pos = SceneTree.globalPosition("Ball", parent);
     let px = pos |> Option.map(p -> p#x);
     let py = pos |> Option.map(p -> p#y);
@@ -229,11 +229,11 @@ def testResolveCollisionVertical(): Unit \ Assert =
 
 @Test
 def testCollectBodiesStaticBody(): Unit \ Assert =
-    let brick = staticBody2D("Brick_0", mkTransform(50.0f32, 50.0f32),
+    let brick = staticBody2D("Brick_0", mkPos(50.0f32, 50.0f32),
         {isSolid = false, destroyed = false},
         collisionShape2D("BrickCollider_0", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) :: Nil
     );
-    let root = node2D("Root", identityTransform(), brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), brick :: Nil);
     let bodies = SceneTree.collectBodies(root);
     Assert.assertEq(expected = 1, List.length(bodies));
     let name = List.head(bodies) |> Option.map(b -> b#name);
@@ -241,11 +241,11 @@ def testCollectBodiesStaticBody(): Unit \ Assert =
 
 @Test
 def testCollectBodiesSkipsDestroyed(): Unit \ Assert =
-    let brick = staticBody2D("Brick_0", mkTransform(50.0f32, 50.0f32),
+    let brick = staticBody2D("Brick_0", mkPos(50.0f32, 50.0f32),
         {isSolid = false, destroyed = true},
         collisionShape2D("BrickCollider_0", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) :: Nil
     );
-    let root = node2D("Root", identityTransform(), brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), brick :: Nil);
     let bodies = SceneTree.collectBodies(root);
     Assert.assertEq(expected = 0, List.length(bodies))
 
@@ -253,11 +253,11 @@ def testCollectBodiesSkipsDestroyed(): Unit \ Assert =
 
 @Test
 def testPhysicsStepKinematicBody(): Unit \ Assert =
-    let paddle = kinematicBody2D("Paddle", mkTransform(100.0f32, 580.0f32),
+    let paddle = kinematicBody2D("Paddle", mkPos(100.0f32, 580.0f32),
         {velocity = {x = 500.0f32, y = 0.0f32}},
         collisionShape2D("PaddleCollider", SceneTree.CollisionShapeData.RectShape({x = 100.0f32, y = 20.0f32})) :: Nil
     );
-    let root = node2D("Root", identityTransform(), paddle :: Nil);
+    let root = node2D("Root", Vec2D.zero(), paddle :: Nil);
     let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 100.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
     let result = SceneTree.physicsStep(root, 0.1f32, config);
     let pos = SceneTree.globalPosition("Paddle", result#root);
@@ -266,15 +266,15 @@ def testPhysicsStepKinematicBody(): Unit \ Assert =
 
 @Test
 def testPhysicsStepRigidBodyStuck(): Unit \ Assert =
-    let paddle = kinematicBody2D("Paddle", mkTransform(350.0f32, 580.0f32),
+    let paddle = kinematicBody2D("Paddle", mkPos(350.0f32, 580.0f32),
         {velocity = Vec2D.zero()},
         collisionShape2D("PaddleCollider", SceneTree.CollisionShapeData.RectShape({x = 100.0f32, y = 20.0f32})) :: Nil
     );
-    let ball = rigidBody2D("Ball", mkTransform(0.0f32, 0.0f32),
+    let ball = rigidBody2D("Ball", mkPos(0.0f32, 0.0f32),
         {velocity = {x = 100.0f32, y = -350.0f32}, stuck = true},
         collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
     );
-    let root = node2D("Root", identityTransform(), paddle :: ball :: Nil);
+    let root = node2D("Root", Vec2D.zero(), paddle :: ball :: Nil);
     let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 350.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
     let result = SceneTree.physicsStep(root, 0.1f32, config);
     let pos = SceneTree.globalPosition("Ball", result#root);
@@ -286,11 +286,11 @@ def testPhysicsStepRigidBodyStuck(): Unit \ Assert =
 
 @Test
 def testUpdateKinematicBody(): Unit \ Assert =
-    let paddle = kinematicBody2D("Paddle", mkTransform(100.0f32, 200.0f32),
+    let paddle = kinematicBody2D("Paddle", mkPos(100.0f32, 200.0f32),
         {velocity = Vec2D.zero()},
         Nil
     );
-    let root = node2D("Root", identityTransform(), paddle :: Nil);
+    let root = node2D("Root", Vec2D.zero(), paddle :: Nil);
     let updated = SceneTree.updateKinematicBody("Paddle",
         _ -> {velocity = {x = 500.0f32, y = 0.0f32}}, root);
     let vel = SceneTree.findNode("Paddle", updated)
@@ -302,11 +302,11 @@ def testUpdateKinematicBody(): Unit \ Assert =
 
 @Test
 def testUpdateRigidBody(): Unit \ Assert =
-    let ball = rigidBody2D("Ball", mkTransform(50.0f32, 50.0f32),
+    let ball = rigidBody2D("Ball", mkPos(50.0f32, 50.0f32),
         {velocity = {x = 100.0f32, y = -200.0f32}, stuck = true},
         Nil
     );
-    let root = node2D("Root", identityTransform(), ball :: Nil);
+    let root = node2D("Root", Vec2D.zero(), ball :: Nil);
     let updated = SceneTree.updateRigidBody("Ball",
         bd -> {stuck = false | bd}, root);
     let stuck = SceneTree.findNode("Ball", updated)
@@ -318,11 +318,11 @@ def testUpdateRigidBody(): Unit \ Assert =
 
 @Test
 def testUpdateStaticBody(): Unit \ Assert =
-    let brick = staticBody2D("Brick", mkTransform(10.0f32, 10.0f32),
+    let brick = staticBody2D("Brick", mkPos(10.0f32, 10.0f32),
         {isSolid = false, destroyed = false},
         Nil
     );
-    let root = node2D("Root", identityTransform(), brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), brick :: Nil);
     let updated = SceneTree.updateStaticBody("Brick",
         _ -> {isSolid = false, destroyed = true}, root);
     let found = SceneTree.findNode("Brick", updated);
@@ -334,8 +334,8 @@ def testUpdateStaticBody(): Unit \ Assert =
 
 @Test
 def testSetNodePosition(): Unit \ Assert =
-    let child = sprite2D("Ball", mkTransform(10.0f32, 20.0f32), mkSpriteData("ball"));
-    let root = node2D("Root", identityTransform(), child :: Nil);
+    let child = sprite2D("Ball", mkPos(10.0f32, 20.0f32), mkSpriteData("ball"));
+    let root = node2D("Root", Vec2D.zero(), child :: Nil);
     let updated = SceneTree.setNodePosition("Ball", {x = 99.0f32, y = 88.0f32}, root);
     let pos = SceneTree.globalPosition("Ball", updated);
     let px = pos |> Option.map(p -> p#x);
@@ -347,7 +347,7 @@ def testSetNodePosition(): Unit \ Assert =
 
 @Test
 def testRigidBodyData(): Unit \ Assert =
-    let ball = rigidBody2D("Ball", mkTransform(50.0f32, 50.0f32),
+    let ball = rigidBody2D("Ball", mkPos(50.0f32, 50.0f32),
         {velocity = {x = 100.0f32, y = -200.0f32}, stuck = true},
         Nil
     );
@@ -357,7 +357,7 @@ def testRigidBodyData(): Unit \ Assert =
 
 @Test
 def testRigidBodyDataNonRigid(): Unit \ Assert =
-    let spriteNode = sprite2D("Ball", mkTransform(0.0f32, 0.0f32), mkSpriteData("ball"));
+    let spriteNode = sprite2D("Ball", mkPos(0.0f32, 0.0f32), mkSpriteData("ball"));
     let result = SceneTree.rigidBodyData(spriteNode);
     Assert.assertTrue(Option.isEmpty(result))
 
@@ -365,7 +365,7 @@ def testRigidBodyDataNonRigid(): Unit \ Assert =
 
 @Test
 def testKinematicBodyData(): Unit \ Assert =
-    let paddle = kinematicBody2D("Paddle", mkTransform(100.0f32, 200.0f32),
+    let paddle = kinematicBody2D("Paddle", mkPos(100.0f32, 200.0f32),
         {velocity = {x = 500.0f32, y = 0.0f32}},
         Nil
     );
@@ -378,7 +378,7 @@ def testKinematicBodyData(): Unit \ Assert =
 @Test
 def testFindRectShape(): Unit \ Assert =
     let children =
-        sprite2D("Sprite", identityTransform(), mkSpriteData("block")) ::
+        sprite2D("Sprite", Vec2D.zero(), mkSpriteData("block")) ::
         collisionShape2D("Collider", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) ::
         Nil;
     let result = SceneTree.findRectShape(children);
@@ -387,7 +387,7 @@ def testFindRectShape(): Unit \ Assert =
 
 @Test
 def testFindRectShapeNone(): Unit \ Assert =
-    let children = sprite2D("Sprite", identityTransform(), mkSpriteData("block")) :: Nil;
+    let children = sprite2D("Sprite", Vec2D.zero(), mkSpriteData("block")) :: Nil;
     let result = SceneTree.findRectShape(children);
     Assert.assertTrue(Option.isEmpty(result))
 
@@ -396,7 +396,7 @@ def testFindRectShapeNone(): Unit \ Assert =
 @Test
 def testFindCircleShape(): Unit \ Assert =
     let children =
-        sprite2D("Sprite", identityTransform(), mkSpriteData("ball")) ::
+        sprite2D("Sprite", Vec2D.zero(), mkSpriteData("ball")) ::
         collisionShape2D("Collider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) ::
         Nil;
     let result = SceneTree.findCircleShape(children);
@@ -404,7 +404,7 @@ def testFindCircleShape(): Unit \ Assert =
 
 @Test
 def testFindCircleShapeNone(): Unit \ Assert =
-    let children = sprite2D("Sprite", identityTransform(), mkSpriteData("ball")) :: Nil;
+    let children = sprite2D("Sprite", Vec2D.zero(), mkSpriteData("ball")) :: Nil;
     let result = SceneTree.findCircleShape(children);
     Assert.assertTrue(Option.isEmpty(result))
 
@@ -412,15 +412,15 @@ def testFindCircleShapeNone(): Unit \ Assert =
 
 @Test
 def testDetectCollisionsBallHitsBrick(): Unit \ Assert =
-    let ball = rigidBody2D("Ball", mkTransform(112.5f32, 83.0f32),
+    let ball = rigidBody2D("Ball", mkPos(112.5f32, 83.0f32),
         {velocity = {x = 0.0f32, y = 100.0f32}, stuck = false},
         collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
     );
-    let brick = staticBody2D("Brick_0", mkTransform(100.0f32, 100.0f32),
+    let brick = staticBody2D("Brick_0", mkPos(100.0f32, 100.0f32),
         {isSolid = false, destroyed = false},
         collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
     );
-    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), ball :: brick :: Nil);
     let events = SceneTree.detectCollisions(root);
     Assert.assertEq(expected = 1, List.length(events));
     let targetName = List.head(events) |> Option.map(e -> e#targetName);
@@ -428,43 +428,43 @@ def testDetectCollisionsBallHitsBrick(): Unit \ Assert =
 
 @Test
 def testDetectCollisionsNoHit(): Unit \ Assert =
-    let ball = rigidBody2D("Ball", mkTransform(0.0f32, 0.0f32),
+    let ball = rigidBody2D("Ball", mkPos(0.0f32, 0.0f32),
         {velocity = {x = 100.0f32, y = 100.0f32}, stuck = false},
         collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
     );
-    let brick = staticBody2D("Brick_0", mkTransform(200.0f32, 200.0f32),
+    let brick = staticBody2D("Brick_0", mkPos(200.0f32, 200.0f32),
         {isSolid = false, destroyed = false},
         collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
     );
-    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), ball :: brick :: Nil);
     let events = SceneTree.detectCollisions(root);
     Assert.assertEq(expected = 0, List.length(events))
 
 @Test
 def testDetectCollisionsStuckBallIgnored(): Unit \ Assert =
-    let ball = rigidBody2D("Ball", mkTransform(112.5f32, 83.0f32),
+    let ball = rigidBody2D("Ball", mkPos(112.5f32, 83.0f32),
         {velocity = {x = 0.0f32, y = 100.0f32}, stuck = true},
         collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
     );
-    let brick = staticBody2D("Brick_0", mkTransform(100.0f32, 100.0f32),
+    let brick = staticBody2D("Brick_0", mkPos(100.0f32, 100.0f32),
         {isSolid = false, destroyed = false},
         collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
     );
-    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), ball :: brick :: Nil);
     let events = SceneTree.detectCollisions(root);
     Assert.assertEq(expected = 0, List.length(events))
 
 @Test
 def testDetectCollisionsAreaContainsNode(): Unit \ Assert =
-    let ball = rigidBody2D("Ball", mkTransform(112.5f32, 83.0f32),
+    let ball = rigidBody2D("Ball", mkPos(112.5f32, 83.0f32),
         {velocity = {x = 0.0f32, y = 100.0f32}, stuck = false},
         collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
     );
-    let brick = staticBody2D("Brick_0", mkTransform(100.0f32, 100.0f32),
+    let brick = staticBody2D("Brick_0", mkPos(100.0f32, 100.0f32),
         {isSolid = false, destroyed = false},
         collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
     );
-    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let root = node2D("Root", Vec2D.zero(), ball :: brick :: Nil);
     let events = SceneTree.detectCollisions(root);
     let areaName = List.head(events) |> Option.map(e -> SceneTree.nodeName(e#area));
     Assert.assertEq(expected = Some("Ball"), areaName)
