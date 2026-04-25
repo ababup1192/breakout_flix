@@ -6,6 +6,7 @@ mod BreakoutScene {
     pub def bricksName(): String = "Bricks"
     pub def deathZoneName(): String = "DeathZone"
     pub def rootName(): String = "Root"
+    pub def powerUpsGroupName(): String = "PowerUps"
 
     // ========================================================================
     // Scene Building
@@ -73,10 +74,13 @@ mod BreakoutScene {
             ::
             SceneTree.area2D(deathZoneName(),
                 {x = 0.0f32, y = sh},
+                {velocity = Vec2D.zero()},
                 SceneTree.collisionShape2D("DeathZoneShape",
                     SceneTree.CollisionShapeData.RectShape({x = sw, y = 20.0f32})
                 ) :: Nil
             )
+            ::
+            SceneTree.node2D(powerUpsGroupName(), Vec2D.zero(), Nil)
             :: Nil
         )
 
@@ -147,12 +151,100 @@ mod BreakoutScene {
             anchorWidth = paddle#size#x
         }
 
-    /// Physics step + collision signals. Phantom types are hidden.
-    pub def stepAndCollide(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.Node \ SceneTree.OnCollision =
-        SceneTree.stepAndCollide(scene, dt, physicsConfig(scene, screenSize))
+    /// Physics step + collision signals with pass-through support.
+    pub def stepAndCollide(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2, passThrough: Bool): SceneTree.Node \ SceneTree.OnCollision =
+        if (passThrough) {
+            let shouldResolve = event -> match event#targetKind {
+                case SceneTree.NodeKind.Fixed(bd) => bd#isSolid
+                case _ => true
+            };
+            SceneTree.stepAndCollideFiltered(scene, dt, physicsConfig(scene, screenSize), shouldResolve)
+        } else
+            SceneTree.stepAndCollide(scene, dt, physicsConfig(scene, screenSize))
 
     pub def destroyBrick(blick: SceneTree.BodyContact, scene: SceneTree.Node): SceneTree.Node =
         SceneTree.updateStaticBody(blick#name, bd -> {destroyed = true | bd}, scene)
+
+    // ========================================================================
+    // Paddle Width (PowerUp: PadSizeIncrease)
+    // ========================================================================
+
+    pub def increasePaddleWidth(amount: Float32, scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.updateChildSpriteAndShape(paddleName(),
+            sd -> {size = {x = sd#size#x + amount, y = sd#size#y} | sd},
+            shape -> match shape {
+                case SceneTree.CollisionShapeData.RectShape(sz) =>
+                    SceneTree.CollisionShapeData.RectShape({x = sz#x + amount, y = sz#y})
+                case other => other
+            },
+            scene)
+
+    pub def resetPaddleWidth(scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.updateChildSpriteAndShape(paddleName(),
+            sd -> {size = {x = Game.playerWidth(), y = Game.playerHeight()} | sd},
+            shape -> match shape {
+                case SceneTree.CollisionShapeData.RectShape(_) =>
+                    SceneTree.CollisionShapeData.RectShape({x = Game.playerWidth(), y = Game.playerHeight()})
+                case other => other
+            },
+            scene)
+
+    // ========================================================================
+    // Sprite Color (Visual effects for active powerups)
+    // ========================================================================
+
+    pub def setPaddleSpriteColor(color: Game.Vec3, scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.updateChildSprite(paddleName(), sd -> {color = color | sd}, scene)
+
+    pub def setBallSpriteColor(color: Game.Vec3, scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.updateChildSprite(ballName(), sd -> {color = color | sd}, scene)
+
+    // ========================================================================
+    // PowerUp Scene Management
+    // ========================================================================
+
+    pub def buildPowerUpNode(name: String, powerUp: Game.PowerUpInfo): SceneTree.Node =
+        SceneTree.area2D(
+            name,
+            powerUp#position,
+            {velocity = powerUp#velocity},
+            SceneTree.sprite2D(
+                "${name}_Sprite",
+                Vec2D.zero(),
+                {size = powerUp#size, color = powerUp#color, texture = powerUp#texture, visible = true}
+            ) ::
+            SceneTree.collisionShape2D(
+                "${name}_Collider",
+                SceneTree.CollisionShapeData.RectShape(powerUp#size)
+            ) :: Nil
+        )
+
+    pub def addPowerUpToField(puNode: SceneTree.Node, scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.mapNode(powerUpsGroupName(), parent ->
+            SceneTree.appendChildren(parent, puNode :: Nil),
+            scene)
+
+    pub def removePowerUpFromField(childName: String, scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.removeChild(powerUpsGroupName(), childName, scene)
+
+    pub def getFieldPowerUps(scene: SceneTree.Node): List[SceneTree.Node] =
+        match SceneTree.findNode(powerUpsGroupName(), scene) {
+            case Some(n) => SceneTree.nodeChildren(n)
+            case None => Nil
+        }
+
+    // ========================================================================
+    // Chaos: small continuous vibration using remaining time as oscillation phase
+    // ========================================================================
+
+    pub def applyChaosOffset(chaosRemaining: Float32, scene: SceneTree.Node): SceneTree.Node =
+        let ampX = 8.0f32;
+        let ampY = 6.0f32;
+        let freqX = 50.0f32;
+        let freqY = 40.0f32;
+        let ox = Vec2D.sin32(chaosRemaining * freqX) * ampX;
+        let oy = Vec2D.cos32(chaosRemaining * freqY) * ampY;
+        SceneTree.setNodePosition(rootName(), {x = ox, y = oy}, scene)
 
     // ========================================================================
     // Rendering: apply shake offset
@@ -160,7 +252,11 @@ mod BreakoutScene {
 
     pub def applyShake(shakeTime: Float32, scene: SceneTree.Node): SceneTree.Node =
         let shake = shakeOffset(shakeTime);
-        SceneTree.setNodePosition(rootName(), shake, scene)
+        let currentPos = match SceneTree.findNode(rootName(), scene) {
+            case Some(n) => SceneTree.nodePosition(n)
+            case None => Vec2D.zero()
+        };
+        SceneTree.setNodePosition(rootName(), Vec2D.add(currentPos, shake), scene)
 
     // ========================================================================
     // Shake calculation

@@ -3,6 +3,6 @@
 def main(): Unit \ IO =
     println("Breakout - LearnOpenGL Recreation");
     discard run {
-        Game.startGame()
-    } with LwjglLayer.withLwjgl;
+        run { Game.startGame() } with LwjglLayer.withLwjgl
+    } with Math.Random.runWithIO;
     println("Game ended.")

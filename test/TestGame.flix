@@ -118,7 +118,8 @@ def mkTestStateWithShake(
         |> SceneTree.setNodePosition("Paddle", {x = px, y = py})
         |> SceneTree.setNodePosition("Ball", {x = bx, y = by})
         |> BreakoutScene.updateBall(_ -> {velocity = {x = vx, y = vy}, stuck = stuck});
-    {scene = scene, levels = Nil, currentLevel = 0, shakeTime = shake}
+    {scene = scene, levels = Nil, currentLevel = 0, shakeTime = shake,
+     powerUpsInField = Map.empty(), powerUpCounter = 0, activeEffects = Nil}
 
 // --- physicsStep via engine (replaces moveBall tests) ---
 
@@ -290,7 +291,13 @@ def mkTestStateWithBricks(
         |> SceneTree.setNodePosition("Paddle", {x = px, y = py})
         |> SceneTree.setNodePosition("Ball", {x = bx, y = by})
         |> BreakoutScene.updateBall(_ -> {velocity = {x = vx, y = vy}, stuck = stuck});
-    {scene = scene, levels = Nil, currentLevel = 0, shakeTime = 0.0f32}
+    {scene = scene, levels = Nil, currentLevel = 0, shakeTime = 0.0f32,
+     powerUpsInField = Map.empty(), powerUpCounter = 0, activeEffects = Nil}
+
+// --- applyCollisions helper (handles Math.Random with seed) ---
+
+def testApplyCollisions(dt: Float32, screenSize: Vec2D.Vec2, state: Game.GameState): Game.GameState =
+    run { applyCollisions(dt, screenSize, state) } with Math.Random.runWithSeed(42i64)
 
 // --- applyCollisions tests ---
 
@@ -312,7 +319,7 @@ def mkTestStateWithBricks(
 @Test
 def testApplyCollisionsBallHitsPaddleRedirectsVelocity(): Unit \ Assert =
     let state = mkTestState(50.0f32, 80.0f32, 80.0f32, 58.0f32, 10.0f32, 35.0f32, false);
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     let vy = (BreakoutScene.ballSnapshot(result#scene))#vel#y;
     Assert.assertTrue(vy < 0.0f32)
 
@@ -320,7 +327,7 @@ def testApplyCollisionsBallHitsPaddleRedirectsVelocity(): Unit \ Assert =
 def testApplyCollisionsBallHitsPaddlePreservesSpeed(): Unit \ Assert =
     let state = mkTestState(50.0f32, 80.0f32, 80.0f32, 58.0f32, 10.0f32, 35.0f32, false);
     let speedBefore = Vec2D.length({x = 10.0f32, y = 35.0f32});
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     let speedAfter = Vec2D.length(vel);
     let diff = Float32.abs(speedAfter - speedBefore);
@@ -345,7 +352,7 @@ def testApplyCollisionsBallHitsPaddlePreservesSpeed(): Unit \ Assert =
 def testApplyCollisionsBallHitsNonSolidBrickDestroys(): Unit \ Assert =
     let brick = mkBrickTemplate({x = 10.0f32, y = 10.0f32}, {x = 80.0f32, y = 20.0f32}, false);
     let state = mkTestStateWithBricks(200.0f32, 200.0f32, 37.5f32, -7.0f32, 0.0f32, 35.0f32, false, brick :: Nil);
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     let brickNode = SceneTree.findNode("Brick_0", result#scene);
     let destroyed = brickNode |> Option.flatMap(SceneTree.staticBodyData) |> Option.map(bd -> bd#destroyed);
     Assert.assertEq(expected = Some(true), destroyed)
@@ -354,14 +361,14 @@ def testApplyCollisionsBallHitsNonSolidBrickDestroys(): Unit \ Assert =
 def testApplyCollisionsBallHitsSolidBrickSetsShake(): Unit \ Assert =
     let brick = mkBrickTemplate({x = 10.0f32, y = 10.0f32}, {x = 80.0f32, y = 20.0f32}, true);
     let state = mkTestStateWithBricks(200.0f32, 200.0f32, 37.5f32, -7.0f32, 0.0f32, 35.0f32, false, brick :: Nil);
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     Assert.assertEq(expected = 0.15f32, result#shakeTime)
 
 @Test
 def testApplyCollisionsBallHitsSolidBrickNotDestroyed(): Unit \ Assert =
     let brick = mkBrickTemplate({x = 10.0f32, y = 10.0f32}, {x = 80.0f32, y = 20.0f32}, true);
     let state = mkTestStateWithBricks(200.0f32, 200.0f32, 37.5f32, -7.0f32, 0.0f32, 35.0f32, false, brick :: Nil);
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     let brickNode = SceneTree.findNode("Brick_0", result#scene);
     let destroyed = brickNode |> Option.flatMap(SceneTree.staticBodyData) |> Option.map(bd -> bd#destroyed);
     Assert.assertEq(expected = Some(false), destroyed)
@@ -382,13 +389,13 @@ def testApplyCollisionsBallHitsSolidBrickNotDestroyed(): Unit \ Assert =
 @Test
 def testApplyCollisionsBallEntersDeathZoneResetsStuck(): Unit \ Assert =
     let state = mkTestState(200.0f32, 200.0f32, 50.0f32, 585.0f32, 10.0f32, 35.0f32, false);
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     Assert.assertTrue((BreakoutScene.ballSnapshot(result#scene))#stuck)
 
 @Test
 def testApplyCollisionsBallEntersDeathZoneResetsVelocity(): Unit \ Assert =
     let state = mkTestState(200.0f32, 200.0f32, 50.0f32, 585.0f32, 10.0f32, 35.0f32, false);
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = initialBallVelocityX(), vel#x);
     Assert.assertEq(expected = initialBallVelocityY(), vel#y)
@@ -399,7 +406,192 @@ def testApplyCollisionsBallEntersDeathZoneResetsVelocity(): Unit \ Assert =
 def testApplyCollisionsStuckBallNoEvents(): Unit \ Assert =
     let brick = mkBrickTemplate({x = 10.0f32, y = 10.0f32}, {x = 80.0f32, y = 20.0f32}, false);
     let state = mkTestStateWithBricks(200.0f32, 200.0f32, 37.5f32, -7.0f32, 0.0f32, 35.0f32, true, brick :: Nil);
-    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
     let brickNode = SceneTree.findNode("Brick_0", result#scene);
     let destroyed = brickNode |> Option.flatMap(SceneTree.staticBodyData) |> Option.map(bd -> bd#destroyed);
     Assert.assertEq(expected = Some(false), destroyed)
+
+// ========================================================================
+// PowerUp Tests
+// ========================================================================
+
+// --- PowerUp helpers ---
+
+// 各パワーアップタイプごとに色が決まっている。Speed は青系 (0.5, 0.5, 1.0)。
+@Test
+def testPowerUpColorSpeed(): Unit \ Assert =
+    let c = Game.powerUpColor(Game.PowerUpType.Speed);
+    Assert.assertEq(expected = 0.5f32, c#r);
+    Assert.assertEq(expected = 0.5f32, c#g);
+    Assert.assertEq(expected = 1.0f32, c#b)
+
+// 持続時間: Sticky は 20 秒、Speed は永続 (duration=0)。
+@Test
+def testPowerUpDurationSticky(): Unit \ Assert =
+    Assert.assertEq(expected = 20.0f32, Game.powerUpDuration(Game.PowerUpType.Sticky))
+
+@Test
+def testPowerUpDurationSpeedPermanent(): Unit \ Assert =
+    Assert.assertEq(expected = 0.0f32, Game.powerUpDuration(Game.PowerUpType.Speed))
+
+// makePowerUp はタイプと位置からパワーアップ情報を生成する。
+// サイズは固定 (60x20)、落下速度は 150。
+@Test
+def testMakePowerUp(): Unit \ Assert =
+    let pu = Game.makePowerUp(Game.PowerUpType.Sticky, {x = 100.0f32, y = 200.0f32});
+    Assert.assertEq(expected = Game.PowerUpType.Sticky, pu#powerUpType);
+    Assert.assertEq(expected = 100.0f32, pu#position#x);
+    Assert.assertEq(expected = 60.0f32, pu#size#x);
+    Assert.assertEq(expected = 20.0f32, pu#size#y);
+    Assert.assertEq(expected = 150.0f32, pu#velocity#y)
+
+// --- isEffectActive ---
+
+// activeEffects リストに指定タイプが含まれていれば true、なければ false。
+@Test
+def testIsEffectActiveTrue(): Unit \ Assert =
+    let effects: List[Game.ActiveEffect] =
+        {powerUpType = Game.PowerUpType.Sticky, remainingTime = 10.0f32} :: Nil;
+    Assert.assertTrue(Game.isEffectActive(Game.PowerUpType.Sticky, effects))
+
+// 空リストなら常に false。
+@Test
+def testIsEffectActiveFalse(): Unit \ Assert =
+    let effects: List[Game.ActiveEffect] = Nil;
+    Assert.assertFalse(Game.isEffectActive(Game.PowerUpType.Sticky, effects))
+
+// --- Scene-tree based PowerUp tests ---
+
+// Helper: add a powerup node to the scene and metadata map
+def addTestPowerUp(name: String, powerUp: Game.PowerUpInfo, state: Game.GameState): Game.GameState =
+    let powerUpNode = BreakoutScene.buildPowerUpNode(name, powerUp);
+    let meta: Game.FieldPowerUp = {powerUpType = powerUp#powerUpType, duration = powerUp#duration};
+    let newScene = BreakoutScene.addPowerUpToField(powerUpNode, state#scene);
+    {scene = newScene,
+     powerUpsInField = Map.insert(name, meta, state#powerUpsInField),
+     powerUpCounter = state#powerUpCounter + 1 | state}
+
+// パワーアップノードは Area で、velocity.y=150 で落下する。
+// dt=1.0 で y=100 → y=250 に移動する。
+//
+//  y=100 +------+
+//        |Speed |  ← 初期位置
+//  y=120 +------+
+//        |      |
+//        v 150/s
+//  y=250 +------+
+//        |Speed |  ← 1秒後
+//  y=270 +------+
+//
+@Test
+def testPowerUpNodeMoveDown(): Unit \ Assert =
+    let powerUp = Game.makePowerUp(Game.PowerUpType.Speed, {x = 100.0f32, y = 100.0f32});
+    let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 555.0f32, 100.0f32, -350.0f32, true);
+    let stateWithPowerUp = addTestPowerUp("PowerUp_0", powerUp, state);
+    let movedScene = testAdvancePhysics(stateWithPowerUp#scene, 1.0f32, {x = 350.0f32, y = 580.0f32});
+    match BreakoutScene.getFieldPowerUps(movedScene) |> List.head {
+        case Some(node) => Assert.assertEq(expected = 250.0f32, SceneTree.nodePosition(node)#y)
+        case None => Assert.assertTrue(false)
+    }
+
+// DeathZone (y=600) と重なったパワーアップはシーンとメタデータの両方から除去される。
+@Test
+def testPowerUpNodeOffScreenRemoved(): Unit \ Assert =
+    // Place powerup at y=600 to overlap with DeathZone (at y=600, size 800x20)
+    let powerUp = Game.makePowerUp(Game.PowerUpType.Speed, {x = 100.0f32, y = 600.0f32});
+    let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 555.0f32, 100.0f32, -350.0f32, true);
+    let stateWithPowerUp = addTestPowerUp("PowerUp_0", powerUp, state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), stateWithPowerUp);
+    Assert.assertEq(expected = 0, List.length(BreakoutScene.getFieldPowerUps(result#scene)));
+    Assert.assertEq(expected = 0, Map.size(result#powerUpsInField))
+
+// パドルとパワーアップが重なると収集される。
+// 収集後: シーンからノード削除、メタデータ削除、効果が即時発動。
+// Speed の場合はボール速度が 1.2 倍になる (100 → 120)。
+//
+//     350       370  430     450
+// y=575 ........+----+.........
+//       ........|PwUp|.........  パワーアップ (60x20)
+// y=580 +------[重なり]-----+
+//       |      パドル       |  (100x20)
+// y=595 ........+----+.........
+//       |                   |
+// y=600 +-------------------+
+//
+@Test
+def testPowerUpPaddleCollision(): Unit \ Assert =
+    // Place powerup overlapping with paddle (paddle at 350,580 size 100x20, powerup at 370,575 size 60x20)
+    let powerUp = Game.makePowerUp(Game.PowerUpType.Speed, {x = 370.0f32, y = 575.0f32});
+    let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 400.0f32, 100.0f32, -350.0f32, false);
+    let stateWithPowerUp = addTestPowerUp("PowerUp_0", powerUp, state);
+    let result = testApplyCollisions(0.001f32, testScreenSize(), stateWithPowerUp);
+    // Powerup should be collected and removed
+    Assert.assertEq(expected = 0, List.length(BreakoutScene.getFieldPowerUps(result#scene)));
+    Assert.assertEq(expected = 0, Map.size(result#powerUpsInField));
+    // Speed powerup should have increased ball velocity
+    let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
+    Assert.assertTrue(Float32.abs(vel#x - 120.0f32) < 0.01f32)
+
+// --- updateActiveEffects ---
+
+// dt 分だけ remainingTime が減り、0 以下になったエフェクトはリストから消える。
+@Test
+def testUpdateActiveEffectsDecay(): Unit \ Assert =
+    let effects: List[Game.ActiveEffect] =
+        {powerUpType = Game.PowerUpType.Sticky, remainingTime = 10.0f32} :: Nil;
+    let state = {activeEffects = effects | mkTestState(350.0f32, 580.0f32, 400.0f32, 555.0f32, 100.0f32, -350.0f32, true)};
+    let result = Game.updateActiveEffects(1.0f32, state);
+    match List.head(result#activeEffects) {
+        case Some(effect) => Assert.assertEq(expected = 9.0f32, effect#remainingTime)
+        case None => Assert.assertTrue(false)
+    }
+
+// remainingTime=0.5 に dt=1.0 → 残り -0.5 → リストから除去。
+@Test
+def testUpdateActiveEffectsExpire(): Unit \ Assert =
+    let effects: List[Game.ActiveEffect] =
+        {powerUpType = Game.PowerUpType.Sticky, remainingTime = 0.5f32} :: Nil;
+    let state = {activeEffects = effects | mkTestState(350.0f32, 580.0f32, 400.0f32, 555.0f32, 100.0f32, -350.0f32, true)};
+    let result = Game.updateActiveEffects(1.0f32, state);
+    Assert.assertEq(expected = 0, List.length(result#activeEffects))
+
+// --- activatePowerUp ---
+
+// Speed パワーアップ: ボール速度が 1.2 倍になる。
+// vel(100, -350) → vel(120, -420)
+@Test
+def testActivatePowerUpSpeedIncreasesBallVelocity(): Unit \ Assert =
+    let meta: Game.FieldPowerUp = {powerUpType = Game.PowerUpType.Speed, duration = 0.0f32};
+    let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 400.0f32, 100.0f32, -350.0f32, false);
+    let result = Game.activatePowerUp(meta, state);
+    let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
+    Assert.assertTrue(Float32.abs(vel#x - 120.0f32) < 0.01f32);
+    Assert.assertTrue(Float32.abs(vel#y - (-420.0f32)) < 0.01f32)
+
+// PadSizeIncrease パワーアップ: パドル幅が 100 → 150 になる。
+@Test
+def testActivatePowerUpPadSizeIncrease(): Unit \ Assert =
+    let meta: Game.FieldPowerUp = {powerUpType = Game.PowerUpType.PadSizeIncrease, duration = 0.0f32};
+    let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 400.0f32, 100.0f32, -350.0f32, false);
+    let result = Game.activatePowerUp(meta, state);
+    let paddle = BreakoutScene.paddleSnapshot(result#scene);
+    Assert.assertEq(expected = 150.0f32, paddle#size#x)
+
+// --- Death zone resets powerups ---
+
+// デスゾーン突入で全パワーアップがリセットされる:
+// - powerUpsInField (未収集ノードの管理マップ) → 空
+// - activeEffects (発動中の効果リスト) → 空
+// - シーン上のパワーアップノード → 全削除
+@Test
+def testDeathZoneResetsPowerUps(): Unit \ Assert =
+    let effects: List[Game.ActiveEffect] =
+        {powerUpType = Game.PowerUpType.Sticky, remainingTime = 10.0f32} :: Nil;
+    let state0 = mkTestState(200.0f32, 200.0f32, 50.0f32, 585.0f32, 10.0f32, 35.0f32, false);
+    let powerUp = Game.makePowerUp(Game.PowerUpType.Speed, {x = 100.0f32, y = 100.0f32});
+    let state1 = addTestPowerUp("PowerUp_0", powerUp, state0);
+    let state = {activeEffects = effects | state1};
+    let result = testApplyCollisions(0.001f32, testScreenSize(), state);
+    Assert.assertEq(expected = 0, Map.size(result#powerUpsInField));
+    Assert.assertEq(expected = 0, List.length(result#activeEffects));
+    Assert.assertEq(expected = 0, List.length(BreakoutScene.getFieldPowerUps(result#scene)))

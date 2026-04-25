@@ -692,6 +692,7 @@ def testStaticBodyDoesNotMove(): Unit \ Assert =
 @Test
 def testArea2DCollectedAsBodyNotSolid(): Unit \ Assert =
     let sensor = area2D("Sensor", mkPos(0.0f32, 590.0f32),
+        {velocity = Vec2D.zero()},
         collisionShape2D("SensorCollider", SceneTree.CollisionShapeData.RectShape({x = 800.0f32, y = 10.0f32})) :: Nil
     );
     let root = node2D("Root", Vec2D.zero(), sensor :: Nil);
@@ -708,6 +709,7 @@ def testArea2DCollisionEventHasAreaKind(): Unit \ Assert =
         collisionShape2D("ProjCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
     );
     let sensor = area2D("Sensor", mkPos(100.0f32, 100.0f32),
+        {velocity = Vec2D.zero()},
         collisionShape2D("SensorCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
     );
     let root = node2D("Root", Vec2D.zero(), projectile :: sensor :: Nil);
@@ -715,8 +717,59 @@ def testArea2DCollisionEventHasAreaKind(): Unit \ Assert =
     Assert.assertEq(expected = 1, List.length(events));
     let isArea = List.head(events) |> Option.map(e ->
         match e#targetKind {
-            case SceneTree.NodeKind.Area => true
+            case SceneTree.NodeKind.Area(_) => true
             case _ => false
         }
     );
     Assert.assertEq(expected = Some(true), isArea)
+
+// --- checkShapeOverlap ---
+
+@Test
+def testCheckShapeOverlapRectRectHit(): Unit \ Assert =
+    let result = SceneTree.checkShapeOverlap(
+        {x = 0.0f32, y = 0.0f32}, SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 50.0f32}),
+        {x = 25.0f32, y = 25.0f32}, SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 50.0f32}));
+    Assert.assertTrue(result)
+
+@Test
+def testCheckShapeOverlapRectRectMiss(): Unit \ Assert =
+    let result = SceneTree.checkShapeOverlap(
+        {x = 0.0f32, y = 0.0f32}, SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 50.0f32}),
+        {x = 100.0f32, y = 100.0f32}, SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 50.0f32}));
+    Assert.assertFalse(result)
+
+@Test
+def testCheckShapeOverlapCircleRectHit(): Unit \ Assert =
+    let result = SceneTree.checkShapeOverlap(
+        {x = 112.5f32, y = 83.0f32}, SceneTree.CollisionShapeData.CircleShape(12.5f32),
+        {x = 100.0f32, y = 100.0f32}, SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32}));
+    Assert.assertTrue(result)
+
+@Test
+def testCheckShapeOverlapCircleRectMiss(): Unit \ Assert =
+    let result = SceneTree.checkShapeOverlap(
+        {x = 0.0f32, y = 0.0f32}, SceneTree.CollisionShapeData.CircleShape(12.5f32),
+        {x = 100.0f32, y = 100.0f32}, SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32}));
+    Assert.assertFalse(result)
+
+@Test
+def testCheckShapeOverlapRectCircleHit(): Unit \ Assert =
+    let result = SceneTree.checkShapeOverlap(
+        {x = 100.0f32, y = 100.0f32}, SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32}),
+        {x = 112.5f32, y = 83.0f32}, SceneTree.CollisionShapeData.CircleShape(12.5f32));
+    Assert.assertTrue(result)
+
+@Test
+def testCheckShapeOverlapCircleCircleHit(): Unit \ Assert =
+    let result = SceneTree.checkShapeOverlap(
+        {x = 0.0f32, y = 0.0f32}, SceneTree.CollisionShapeData.CircleShape(20.0f32),
+        {x = 30.0f32, y = 0.0f32}, SceneTree.CollisionShapeData.CircleShape(20.0f32));
+    Assert.assertTrue(result)
+
+@Test
+def testCheckShapeOverlapCircleCircleMiss(): Unit \ Assert =
+    let result = SceneTree.checkShapeOverlap(
+        {x = 0.0f32, y = 0.0f32}, SceneTree.CollisionShapeData.CircleShape(10.0f32),
+        {x = 100.0f32, y = 0.0f32}, SceneTree.CollisionShapeData.CircleShape(10.0f32));
+    Assert.assertFalse(result)
