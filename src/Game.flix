@@ -1,14 +1,6 @@
 // Game module — types, effects, constants, level parsing, and game logic
 
 mod Game {
-    pub enum GameEvent with Eq, ToString {
-        case BrickDestroyed
-        case PaddleHit
-        case BallReset
-        case BallLaunched
-        case SolidBrickHit
-    }
-
     pub type alias Vec3 = {r = Float32, g = Float32, b = Float32}
 
     pub type alias BrickTemplate = {
@@ -173,21 +165,32 @@ mod Game {
 
     def updateGame(state: GameState): GameState \ Game =
         let dt = Game.getDeltaTime();
-        let s1 = processInput(state);
         let screenSize = {x = Int32.toFloat32(screenWidth()), y = Int32.toFloat32(screenHeight())};
-        let result = BreakoutScene.physicsStep(s1#scene, dt, screenSize);
-        let s2 = {scene = result#root | s1};
-        let (s3, allEvents) = GameAction.unpack(
-            GameAction.foldSignals(onSignal, s2, result#signals));
-        tickShake(handleEvents(s3, allEvents), dt)
+        state
+            |> processInput
+            |> applyCollisions(dt, screenSize)
+            |> tickShake(dt)
 
-    pub def handleEvents(state: GameState, events: List[GameEvent]): GameState =
-        List.foldLeft((s, event) -> match event {
-            case GameEvent.SolidBrickHit => {shakeTime = 0.15f32 | s}
-            case _ => s
-        }, state, events)
+    def applyCollisions(dt: Float32, screenSize: Vec2D.Vec2, state: GameState): GameState =
+        run {
+            let newScene = BreakoutScene.stepAndCollide(state#scene, dt, screenSize);
+            {scene = newScene | state}
+        } with handler SceneTree.OnCollision {
+            def bodyEntered(nodeName, selfPos, body, k) =
+                let s = k(());
+                match nodeName {
+                    case "Ball" => onBallBodyEntered(selfPos, body, s)
+                    case _ => s
+                }
+            def areaEntered(nodeName, _selfPos, body, k) =
+                let s = k(());
+                match nodeName {
+                    case "Ball" => onBallAreaEntered(body, s)
+                    case _ => s
+                }
+        }
 
-    pub def tickShake(state: GameState, dt: Float32): GameState =
+    pub def tickShake(dt: Float32, state: GameState): GameState =
         if (state#shakeTime > 0.0f32)
             {shakeTime = Float32.max(0.0f32, state#shakeTime - dt) | state}
         else state
@@ -206,23 +209,11 @@ mod Game {
         } else s1
 
     // ========================================================================
-    // Signal Handlers (Godot _on_*_entered style)
+    // Collision Handlers (Godot _on_*_entered style)
     // ========================================================================
 
-    def onSignal(sig: SceneTree.NodeSignal,
-                 state: GameState): GameAction.GameAction[GameState] =
-        match sig#nodeName {
-            case "Ball" => match sig#signal {
-                case SceneTree.Signal.BodyEntered(body) =>
-                    onBallBodyEntered(sig#selfPosition, body, state)
-                case SceneTree.Signal.AreaEntered(body) =>
-                    onBallAreaEntered(body, state)
-            }
-            case _ => GameAction.pure(state)
-        }
-
     def onBallBodyEntered(selfPos: Vec2D.Vec2, body: SceneTree.BodyContact,
-                          state: GameState): GameAction.GameAction[GameState] =
+                          state: GameState): GameState =
         match body#name {
             case "Paddle" =>
                 let ball = BreakoutScene.ballSnapshot(state#scene);
@@ -230,24 +221,25 @@ mod Game {
                 let speed = Vec2D.length(ball#vel);
                 let newVel = Vec2D.mul(direction, speed);
                 let scene1 = BreakoutScene.setBallVelocity(newVel, state#scene);
-                GameAction.of({scene = scene1 | state}, GameEvent.PaddleHit :: Nil)
+                {scene = scene1 | state}
             case _ if body#group == "Bricks" =>
-                let scene = if (body#isSolid) state#scene
-                    else BreakoutScene.destroyBrick(body, state#scene);
-                let event = if (body#isSolid) GameEvent.SolidBrickHit
-                    else GameEvent.BrickDestroyed;
-                GameAction.of({scene = scene | state}, event :: Nil)
-            case _ => GameAction.pure(state)
+                if (body#isSolid)
+                    {shakeTime = 0.15f32 | state}
+                else {
+                    let scene = BreakoutScene.destroyBrick(body, state#scene);
+                    {scene = scene | state}
+                }
+            case _ => state
         }
 
     def onBallAreaEntered(body: SceneTree.BodyContact,
-                          state: GameState): GameAction.GameAction[GameState] =
+                          state: GameState): GameState =
         match body#name {
             case "DeathZone" =>
                 let scene1 = BreakoutScene.updateBall(
                     _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
                           stuck = true}, state#scene);
-                GameAction.of({scene = scene1 | state}, GameEvent.BallReset :: Nil)
-            case _ => GameAction.pure(state)
+                {scene = scene1 | state}
+            case _ => state
         }
 }

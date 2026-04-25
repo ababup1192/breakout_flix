@@ -197,14 +197,21 @@ mod BreakoutScene {
     // Physics Step
     // ========================================================================
 
-    pub def physicsStep(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.PhysicsResult =
+    def physicsConfig(scene: SceneTree.Node, screenSize: Vec2D.Vec2): SceneTree.PhysicsConfig =
         let paddle = paddleSnapshot(scene);
-        let config = {
+        {
             screenSize = screenSize,
             anchorPos = paddle#pos,
             anchorWidth = paddle#size#x
-        };
-        SceneTree.physicsStep(scene, dt, config)
+        }
+
+    /// Physics step + collision signals. Phantom types are hidden.
+    pub def stepAndCollide(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.Node \ SceneTree.OnCollision =
+        SceneTree.stepAndCollide(scene, dt, physicsConfig(scene, screenSize))
+
+    /// Physics only (no collision signals). For tests etc.
+    pub def advancePhysics(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.Node =
+        SceneTree.advancePhysics(scene, dt, physicsConfig(scene, screenSize))
 
     pub def destroyBrick(blick: SceneTree.BodyContact, scene: SceneTree.Node): SceneTree.Node =
         SceneTree.updateStaticBody(blick#name, bd -> {destroyed = true | bd}, scene)

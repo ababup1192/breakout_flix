@@ -7,8 +7,7 @@ use Game.{parseLevelLine, parseLevel, initGame,
           initialBallVelocityX, initialBallVelocityY,
           processInput,
           keyA, keyD, keySpace,
-          handleEvents, tickShake}
-use Game.GameEvent
+          tickShake}
 
 // --- parseLevelLine ---
 
@@ -160,7 +159,8 @@ def testScreenSize(): Vec2D.Vec2 = {x = 800.0f32, y = 600.0f32}
 @Test
 def testPhysicsStepBallStuck(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let result = {scene = (BreakoutScene.physicsStep(state#scene, 0.016f32, testScreenSize()))#root | state};
+    let newRoot = BreakoutScene.advancePhysics(state#scene, 0.016f32, testScreenSize());
+    let result = {scene = newRoot | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let expectedX = 350.0f32 + playerWidth() / 2.0f32 - ballRadiusConst();
     let expectedY = 580.0f32 - ballRadiusConst() * 2.0f32;
@@ -170,7 +170,8 @@ def testPhysicsStepBallStuck(): Unit \ Assert =
 @Test
 def testPhysicsStepBallNormal(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 300.0f32, 100.0f32, -350.0f32, false);
-    let result = {scene = (BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()))#root | state};
+    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let result = {scene = newRoot | state};
     let pos = BreakoutScene.ballPos(result#scene);
     Assert.assertEq(expected = 500.0f32, pos#x);
     Assert.assertEq(expected = 0.0f32, pos#y)
@@ -178,7 +179,8 @@ def testPhysicsStepBallNormal(): Unit \ Assert =
 @Test
 def testPhysicsStepBallLeftWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 5.0f32, 300.0f32, -100.0f32, 0.0f32, false);
-    let result = {scene = (BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()))#root | state};
+    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let result = {scene = newRoot | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#x);
@@ -189,7 +191,8 @@ def testPhysicsStepBallRightWall(): Unit \ Assert =
     let ballSize = ballRadiusConst() * 2.0f32;
     let startX = Int32.toFloat32(screenWidth()) - ballSize - 10.0f32;
     let state = mkTestState(350.0f32, 580.0f32, startX, 300.0f32, 200.0f32, 0.0f32, false);
-    let result = {scene = (BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()))#root | state};
+    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let result = {scene = newRoot | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = Int32.toFloat32(screenWidth()) - ballSize, pos#x);
@@ -198,7 +201,8 @@ def testPhysicsStepBallRightWall(): Unit \ Assert =
 @Test
 def testPhysicsStepBallTopWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 5.0f32, 0.0f32, -100.0f32, false);
-    let result = {scene = (BreakoutScene.physicsStep(state#scene, 1.0f32, testScreenSize()))#root | state};
+    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let result = {scene = newRoot | state};
     let pos = BreakoutScene.ballPos(result#scene);
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#y);
@@ -251,36 +255,22 @@ def testProcessInputLaunchBall(): Unit \ Assert =
     let result = run { processInput(state) } with withMockInput(Set#{keySpace()});
     Assert.assertFalse(BreakoutScene.isBallStuck(result#scene))
 
-// --- handleEvents ---
-
-@Test
-def testHandleEventsSolidBrickHit(): Unit \ Assert =
-    let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let result = handleEvents(state, GameEvent.SolidBrickHit :: Nil);
-    Assert.assertEq(expected = 0.15f32, result#shakeTime)
-
-@Test
-def testHandleEventsOtherEvent(): Unit \ Assert =
-    let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let result = handleEvents(state, GameEvent.PaddleHit :: Nil);
-    Assert.assertEq(expected = 0.0f32, result#shakeTime)
-
 // --- tickShake ---
 
 @Test
 def testTickShakeDecay(): Unit \ Assert =
     let state = mkTestStateWithShake(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true, 0.15f32);
-    let result = tickShake(state, 0.05f32);
+    let result = tickShake(0.05f32, state);
     Assert.assertTrue(result#shakeTime > 0.09f32 and result#shakeTime < 0.11f32)
 
 @Test
 def testTickShakeClampToZero(): Unit \ Assert =
     let state = mkTestStateWithShake(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true, 0.02f32);
-    let result = tickShake(state, 0.05f32);
+    let result = tickShake(0.05f32, state);
     Assert.assertEq(expected = 0.0f32, result#shakeTime)
 
 @Test
 def testTickShakeAlreadyZero(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let result = tickShake(state, 0.016f32);
+    let result = tickShake(0.016f32, state);
     Assert.assertEq(expected = 0.0f32, result#shakeTime)

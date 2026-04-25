@@ -75,22 +75,24 @@ mod SceneTree {
         diff = Vec2D.Vec2
     }
 
-    // Godot-inspired signal types — future: TreeEntered, Process, Ready, etc.
-    pub enum Signal {
-        case BodyEntered(BodyContact)
-        case AreaEntered(BodyContact)
+    // Godot-inspired signals via algebraic effects
+    pub eff OnCollision {
+        def bodyEntered(nodeName: String, selfPos: Vec2D.Vec2, body: BodyContact): Unit
+        def areaEntered(nodeName: String, selfPos: Vec2D.Vec2, body: BodyContact): Unit
     }
 
-    pub type alias NodeSignal = {
-        nodeName = String,
-        selfPosition = Vec2D.Vec2,
-        signal = Signal
+    // Phantom types for physics phase tracking
+    pub enum Pre       // before physics step
+    pub enum Post      // after physics step
+
+    pub enum Scene[_phase] {
+        case MkScene(Node)
     }
 
-    pub type alias PhysicsResult = {
-        root = Node,
-        signals = List[NodeSignal]
-    }
+    pub def pre(node: Node): Scene[Pre] = Scene.MkScene(node)
+
+    pub def sceneNode(scene: Scene[Post]): Node =
+        let Scene.MkScene(n) = scene; n
 
     type alias RigidBodyInfo = {
         name = String,
@@ -424,7 +426,7 @@ mod SceneTree {
                         |> updateRigidBody(rigidName, bd -> {velocity = newVel | bd})
             }, root, events)
 
-    def toNodeSignal(event: CollisionEvent): NodeSignal =
+    def fireCollisionSignal(event: CollisionEvent): Unit \ OnCollision =
         let selfPosition = Vec2D.add(event#areaGlobalPos, {x = event#areaRadius, y = event#areaRadius});
         let halfSize = Vec2D.div(event#targetSize, 2.0f32);
         let bodyPosition = Vec2D.add(event#targetPosition, halfSize);
@@ -432,23 +434,47 @@ mod SceneTree {
             case NodeKind.Fixed(bd) => bd#isSolid
             case _ => false
         };
-        let body = {name = event#targetName, position = bodyPosition, kind = event#targetKind, isSolid = isSolid, group = event#targetGroup};
-        let sig = match event#targetKind {
-            case NodeKind.Area => Signal.AreaEntered(body)
-            case _ => Signal.BodyEntered(body)
-        };
-        {nodeName = nodeName(event#area), selfPosition = selfPosition, signal = sig}
+        let body: BodyContact = {name = event#targetName, position = bodyPosition, kind = event#targetKind, isSolid = isSolid, group = event#targetGroup};
+        match event#targetKind {
+            case NodeKind.Area => OnCollision.areaEntered(nodeName(event#area), selfPosition, body)
+            case _ => OnCollision.bodyEntered(nodeName(event#area), selfPosition, body)
+        }
 
     // ========================================================================
-    // Engine: physicsStep
+    // Engine: physicsStep (pure — no effects)
     // ========================================================================
 
-    pub def physicsStep(root: Node, dt: Float32, config: PhysicsConfig): PhysicsResult =
+    pub def physicsStep(scene: Scene[Pre], dt: Float32, config: PhysicsConfig): Scene[Post] =
+        let Scene.MkScene(root) = scene;
         let movedRoot = physicsStepNode(root, dt, config);
         let events = detectCollisions(movedRoot);
-        let resolvedRoot = resolveDetectedCollisions(movedRoot, events);
-        let signals = List.map(event -> toNodeSignal(event), events);
-        {root = resolvedRoot, signals = signals}
+        Scene.MkScene(resolveDetectedCollisions(movedRoot, events))
+
+    // ========================================================================
+    // Engine: emitCollisions (fire OnCollision effects)
+    // ========================================================================
+
+    pub def emitCollisions(scene: Scene[Pre], dt: Float32, config: PhysicsConfig): Unit \ OnCollision =
+        let Scene.MkScene(root) = scene;
+        let movedRoot = physicsStepNode(root, dt, config);
+        let events = detectCollisions(movedRoot);
+        List.forEach(event -> fireCollisionSignal(event), events)
+
+    // ========================================================================
+    // Engine: High-level API (hides phantom types)
+    // ========================================================================
+
+    /// Physics step + collision signal emission in one call.
+    /// Physics is computed once; phantom types enforce correctness internally.
+    pub def stepAndCollide(node: Node, dt: Float32, config: PhysicsConfig): Node \ OnCollision =
+        let movedRoot = physicsStepNode(node, dt, config);
+        let events = detectCollisions(movedRoot);
+        List.forEach(event -> fireCollisionSignal(event), events);
+        resolveDetectedCollisions(movedRoot, events)
+
+    /// Physics step only (no collision signals).
+    pub def advancePhysics(node: Node, dt: Float32, config: PhysicsConfig): Node =
+        sceneNode(physicsStep(pre(node), dt, config))
 
     def physicsStepNode(node: Node, dt: Float32, config: PhysicsConfig): Node =
         let Node.MkNode(name, pos, kind, children) = node;
