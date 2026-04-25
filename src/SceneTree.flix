@@ -45,13 +45,36 @@ mod SceneTree {
         position = Vec2D.Vec2,
         shape = CollisionShapeData,
         isSolid = Bool,
-        destroyed = Bool
+        destroyed = Bool,
+        kind = NodeKind
     }
 
     pub type alias PhysicsConfig = {
         screenSize = Vec2D.Vec2,
         anchorPos = Vec2D.Vec2,
         anchorWidth = Float32
+    }
+
+    pub type alias CollisionEvent = {
+        targetName = String,
+        targetKind = NodeKind,
+        area = Node,
+        areaGlobalPos = Vec2D.Vec2,
+        direction = Direction,
+        diff = Vec2D.Vec2
+    }
+
+    pub type alias PhysicsResult = {
+        root = Node,
+        collisions = List[CollisionEvent]
+    }
+
+    type alias RigidBodyInfo = {
+        name = String,
+        node = Node,
+        globalPos = Vec2D.Vec2,
+        radius = Float32,
+        stuck = Bool
     }
 
     // ========================================================================
@@ -266,14 +289,15 @@ mod SceneTree {
     pub def collectBodies(node: Node): List[BodyInfo] =
         collectBodiesHelper(node, Vec2D.zero())
 
-    def extractShapes(name: String, globalPos: Vec2D.Vec2, isSolid: Bool, destroyed: Bool, children: List[Node]): List[BodyInfo] =
+    def extractShapes(name: String, globalPos: Vec2D.Vec2, isSolid: Bool, destroyed: Bool, kind: NodeKind, children: List[Node]): List[BodyInfo] =
         List.filterMap(child -> match nodeKind(child) {
             case NodeKind.Shape(shape) => Some({
                 name = name,
                 position = globalPos,
                 shape = shape,
                 isSolid = isSolid,
-                destroyed = destroyed
+                destroyed = destroyed,
+                kind = kind
             })
             case _ => None
         }, children)
@@ -285,16 +309,16 @@ mod SceneTree {
             case NodeKind.Fixed(bd) =>
                 if (bd#destroyed) Nil
                 else {
-                    let shapes = extractShapes(name, globalPos, bd#isSolid, bd#destroyed, children);
+                    let shapes = extractShapes(name, globalPos, bd#isSolid, bd#destroyed, kind, children);
                     let childBodies = List.flatMap(child -> collectBodiesHelper(child, globalPos), children);
                     List.append(shapes, childBodies)
                 }
             case NodeKind.Kinematic(_) =>
-                let shapes = extractShapes(name, globalPos, true, false, children);
+                let shapes = extractShapes(name, globalPos, true, false, kind, children);
                 let childBodies = List.flatMap(child -> collectBodiesHelper(child, globalPos), children);
                 List.append(shapes, childBodies)
             case NodeKind.Area =>
-                let shapes = extractShapes(name, globalPos, false, false, children);
+                let shapes = extractShapes(name, globalPos, false, false, kind, children);
                 let childBodies = List.flatMap(child -> collectBodiesHelper(child, globalPos), children);
                 List.append(shapes, childBodies)
             case NodeKind.Plain =>
@@ -306,11 +330,57 @@ mod SceneTree {
         }
 
     // ========================================================================
+    // Engine: collectRigidBodies
+    // ========================================================================
+
+    pub def collectRigidBodies(root: Node): List[RigidBodyInfo] =
+        collectRigidBodiesHelper(root, Vec2D.zero())
+
+    def collectRigidBodiesHelper(node: Node, parentPos: Vec2D.Vec2): List[RigidBodyInfo] =
+        let Node.MkNode(name, transform, kind, children) = node;
+        let globalPos = Vec2D.add(parentPos, transform#position);
+        match kind {
+            case NodeKind.Rigid(bd) =>
+                let radius = findCircleShape(children) |> Option.getWithDefault(12.5f32);
+                {name = name, node = node, globalPos = globalPos, radius = radius, stuck = bd#stuck} :: Nil
+            case _ =>
+                List.flatMap(child -> collectRigidBodiesHelper(child, globalPos), children)
+        }
+
+    // ========================================================================
+    // Engine: detectCollisions
+    // ========================================================================
+
+    pub def detectCollisions(root: Node): List[CollisionEvent] =
+        let rigids = collectRigidBodies(root);
+        let bodies = collectBodies(root);
+        List.flatMap(rigid ->
+            if (rigid#stuck) Nil
+            else List.filterMap(body ->
+                match body#shape {
+                    case CollisionShapeData.RectShape(size) =>
+                        checkCircleRect(rigid#globalPos, rigid#radius, body#position, size)
+                            |> Option.map(match (dir, diff) -> {
+                                targetName = body#name,
+                                targetKind = body#kind,
+                                area = rigid#node,
+                                areaGlobalPos = rigid#globalPos,
+                                direction = dir,
+                                diff = diff
+                            })
+                    case _ => None
+                }, bodies
+            ), rigids
+        )
+
+    // ========================================================================
     // Engine: physicsStep
     // ========================================================================
 
-    pub def physicsStep(root: Node, dt: Float32, config: PhysicsConfig): Node =
-        physicsStepNode(root, dt, config)
+    pub def physicsStep(root: Node, dt: Float32, config: PhysicsConfig): PhysicsResult =
+        let movedRoot = physicsStepNode(root, dt, config);
+        let collisions = detectCollisions(movedRoot);
+        {root = movedRoot, collisions = collisions}
 
     def physicsStepNode(node: Node, dt: Float32, config: PhysicsConfig): Node =
         let Node.MkNode(name, transform, kind, children) = node;

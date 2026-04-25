@@ -260,7 +260,7 @@ def testPhysicsStepKinematicBody(): Unit \ Assert =
     let root = node2D("Root", identityTransform(), paddle :: Nil);
     let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 100.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
     let result = SceneTree.physicsStep(root, 0.1f32, config);
-    let pos = SceneTree.globalPosition("Paddle", result);
+    let pos = SceneTree.globalPosition("Paddle", result#root);
     let px = pos |> Option.map(p -> p#x);
     Assert.assertEq(expected = Some(150.0f32), px)
 
@@ -277,7 +277,7 @@ def testPhysicsStepRigidBodyStuck(): Unit \ Assert =
     let root = node2D("Root", identityTransform(), paddle :: ball :: Nil);
     let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 350.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
     let result = SceneTree.physicsStep(root, 0.1f32, config);
-    let pos = SceneTree.globalPosition("Ball", result);
+    let pos = SceneTree.globalPosition("Ball", result#root);
     let px = pos |> Option.map(p -> p#x);
     let expectedX = 350.0f32 + 100.0f32 / 2.0f32 - 12.5f32;
     Assert.assertEq(expected = Some(expectedX), px)
@@ -407,3 +407,64 @@ def testFindCircleShapeNone(): Unit \ Assert =
     let children = sprite2D("Sprite", identityTransform(), mkSpriteData("ball")) :: Nil;
     let result = SceneTree.findCircleShape(children);
     Assert.assertTrue(Option.isEmpty(result))
+
+// --- detectCollisions ---
+
+@Test
+def testDetectCollisionsBallHitsBrick(): Unit \ Assert =
+    let ball = rigidBody2D("Ball", mkTransform(112.5f32, 83.0f32),
+        {velocity = {x = 0.0f32, y = 100.0f32}, stuck = false},
+        collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
+    );
+    let brick = staticBody2D("Brick_0", mkTransform(100.0f32, 100.0f32),
+        {isSolid = false, destroyed = false},
+        collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let events = SceneTree.detectCollisions(root);
+    Assert.assertEq(expected = 1, List.length(events));
+    let targetName = List.head(events) |> Option.map(e -> e#targetName);
+    Assert.assertEq(expected = Some("Brick_0"), targetName)
+
+@Test
+def testDetectCollisionsNoHit(): Unit \ Assert =
+    let ball = rigidBody2D("Ball", mkTransform(0.0f32, 0.0f32),
+        {velocity = {x = 100.0f32, y = 100.0f32}, stuck = false},
+        collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
+    );
+    let brick = staticBody2D("Brick_0", mkTransform(200.0f32, 200.0f32),
+        {isSolid = false, destroyed = false},
+        collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let events = SceneTree.detectCollisions(root);
+    Assert.assertEq(expected = 0, List.length(events))
+
+@Test
+def testDetectCollisionsStuckBallIgnored(): Unit \ Assert =
+    let ball = rigidBody2D("Ball", mkTransform(112.5f32, 83.0f32),
+        {velocity = {x = 0.0f32, y = 100.0f32}, stuck = true},
+        collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
+    );
+    let brick = staticBody2D("Brick_0", mkTransform(100.0f32, 100.0f32),
+        {isSolid = false, destroyed = false},
+        collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let events = SceneTree.detectCollisions(root);
+    Assert.assertEq(expected = 0, List.length(events))
+
+@Test
+def testDetectCollisionsAreaContainsNode(): Unit \ Assert =
+    let ball = rigidBody2D("Ball", mkTransform(112.5f32, 83.0f32),
+        {velocity = {x = 0.0f32, y = 100.0f32}, stuck = false},
+        collisionShape2D("BallCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
+    );
+    let brick = staticBody2D("Brick_0", mkTransform(100.0f32, 100.0f32),
+        {isSolid = false, destroyed = false},
+        collisionShape2D("BrickCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", identityTransform(), ball :: brick :: Nil);
+    let events = SceneTree.detectCollisions(root);
+    let areaName = List.head(events) |> Option.map(e -> SceneTree.nodeName(e#area));
+    Assert.assertEq(expected = Some("Ball"), areaName)

@@ -200,7 +200,7 @@ mod BreakoutScene {
     // Physics Step
     // ========================================================================
 
-    pub def physicsStep(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.Node =
+    pub def physicsStep(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.PhysicsResult =
         let paddle = paddleSnapshot(scene);
         let config = {
             screenSize = screenSize,
@@ -208,6 +208,9 @@ mod BreakoutScene {
             anchorWidth = paddle#size#x
         };
         SceneTree.physicsStep(scene, dt, config)
+
+    pub def destroyBrickByName(name: String, scene: SceneTree.Node): SceneTree.Node =
+        SceneTree.updateStaticBody(name, bd -> {destroyed = true | bd}, scene)
 
     // ========================================================================
     // Rendering: apply shake offset
