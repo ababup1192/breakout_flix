@@ -166,12 +166,29 @@ mod BreakoutScene {
     // Shake calculation
     // ========================================================================
 
-    /// shakeTime > 0 のとき sin/cos でオフセットを生成
+    /// shakeTime (0.15 → 0 へ毎フレーム減衰) から画面オフセットを生成する。
+    ///
+    /// sin/cos の位相をずらして楕円状のリサージュ振動を作り、
+    /// shakeTime を振幅の係数にすることで自然に減衰させる。
+    ///
+    ///   振幅
+    ///    |*              sin(t*freqX) * t * ampX  (x軸)
+    ///    | *             cos(t*freqY) * t * ampY  (y軸)
+    ///    |  *
+    ///    |    *  *  *
+    ///    +-------------- t → 0
+    ///   0.15           0.0
+    ///
+    /// t が大きいほど高周波・大振幅で揺れ、0 に近づくと静止する。
     pub def shakeOffset(shakeTime: Float32): Vec2D.Vec2 =
         if (shakeTime <= 0.0f32) Vec2D.zero()
         else {
-            let ox = Vec2D.sin32(shakeTime * 100.0f32) * shakeTime * 80.0f32;
-            let oy = Vec2D.cos32(shakeTime * 80.0f32) * shakeTime * 60.0f32;
+            let freqX = 100.0f32;
+            let freqY = 80.0f32;
+            let ampX  = 80.0f32;
+            let ampY  = 60.0f32;
+            let ox = Vec2D.sin32(shakeTime * freqX) * shakeTime * ampX;
+            let oy = Vec2D.cos32(shakeTime * freqY) * shakeTime * ampY;
             {x = ox, y = oy}
         }
 }
