@@ -158,7 +158,12 @@ def testScreenSize(): Vec2D.Vec2 = {x = 800.0f32, y = 600.0f32}
 
 def testAdvancePhysics(scene: SceneTree.Node, dt: Float32, paddlePos: Vec2D.Vec2): SceneTree.Node =
     let config: SceneTree.PhysicsConfig = {screenSize = testScreenSize(), anchorPos = paddlePos, anchorWidth = playerWidth()};
-    SceneTree.advancePhysics(scene, dt, config)
+    run {
+        SceneTree.stepAndCollide(scene, dt, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    }
 
 @Test
 def testPhysicsStepBallStuck(): Unit \ Assert =

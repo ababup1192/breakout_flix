@@ -410,17 +410,22 @@ def testStepAndCollideStuckNoEvents(): Unit \ Assert =
     }
 
 // ========================================================================
-// advancePhysics (via SceneTree directly)
+// stepAndCollide (via SceneTree directly)
 // ========================================================================
 
 @Test
-def testAdvancePhysicsBallMoves(): Unit \ Assert =
+def testStepAndCollideBallMoves(): Unit \ Assert =
     let scene = mkSceneWith800x600();
     let scene1 = BreakoutScene.updateBall(bd -> {stuck = false | bd}, scene);
     let posBefore = (BreakoutScene.ballSnapshot(scene1))#pos;
     let screenSize = {x = 800.0f32, y = 600.0f32};
     let config: SceneTree.PhysicsConfig = {screenSize = screenSize, anchorPos = {x = 350.0f32, y = 580.0f32}, anchorWidth = playerWidth()};
-    let scene2 = SceneTree.advancePhysics(scene1, 0.1f32, config);
+    let scene2 = run {
+        SceneTree.stepAndCollide(scene1, 0.1f32, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    };
     let posAfter = (BreakoutScene.ballSnapshot(scene2))#pos;
     let moved = not (posBefore#x == posAfter#x and posBefore#y == posAfter#y);
     Assert.assertTrue(moved)

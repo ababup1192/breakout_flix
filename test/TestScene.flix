@@ -259,7 +259,12 @@ def testPhysicsStepKinematicBody(): Unit \ Assert =
     );
     let root = node2D("Root", Vec2D.zero(), paddle :: Nil);
     let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 100.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
-    let newRoot = SceneTree.sceneNode(SceneTree.physicsStep(SceneTree.pre(root), 0.1f32, config));
+    let newRoot = run {
+        SceneTree.stepAndCollide(root, 0.1f32, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    };
     let pos = SceneTree.globalPosition("Paddle", newRoot);
     let px = pos |> Option.map(p -> p#x);
     Assert.assertEq(expected = Some(150.0f32), px)
@@ -276,7 +281,12 @@ def testPhysicsStepRigidBodyStuck(): Unit \ Assert =
     );
     let root = node2D("Root", Vec2D.zero(), paddle :: ball :: Nil);
     let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = {x = 350.0f32, y = 580.0f32}, anchorWidth = 100.0f32};
-    let newRoot = SceneTree.sceneNode(SceneTree.physicsStep(SceneTree.pre(root), 0.1f32, config));
+    let newRoot = run {
+        SceneTree.stepAndCollide(root, 0.1f32, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    };
     let pos = SceneTree.globalPosition("Ball", newRoot);
     let px = pos |> Option.map(p -> p#x);
     let expectedX = 350.0f32 + 100.0f32 / 2.0f32 - 12.5f32;

@@ -51,7 +51,6 @@ mod SceneTree {
         position = Vec2D.Vec2,
         shape = CollisionShapeData,
         isSolid = Bool,
-        destroyed = Bool,
         kind = NodeKind,
         group = String
     }
@@ -80,19 +79,6 @@ mod SceneTree {
         def bodyEntered(nodeName: String, selfPos: Vec2D.Vec2, body: BodyContact): Unit
         def areaEntered(nodeName: String, selfPos: Vec2D.Vec2, body: BodyContact): Unit
     }
-
-    // Phantom types for physics phase tracking
-    pub enum Pre       // before physics step
-    pub enum Post      // after physics step
-
-    pub enum Scene[_phase] {
-        case MkScene(Node)
-    }
-
-    pub def pre(node: Node): Scene[Pre] = Scene.MkScene(node)
-
-    pub def sceneNode(scene: Scene[Post]): Node =
-        let Scene.MkScene(n) = scene; n
 
     type alias RigidBodyInfo = {
         name = String,
@@ -211,14 +197,6 @@ mod SceneTree {
             case _ => None
         }
 
-    pub def modifyStaticBody(f: StaticBodyData -> StaticBodyData, node: Node): Node =
-        match nodeKind(node) {
-            case NodeKind.Fixed(bd) =>
-                let Node.MkNode(n, t, _, ch) = node;
-                Node.MkNode(n, t, NodeKind.Fixed(f(bd)), ch)
-            case _ => node
-        }
-
     pub def findRectShape(children: List[Node]): Option[Vec2D.Vec2] =
         List.findMap(child -> match nodeKind(child) {
             case NodeKind.Shape(CollisionShapeData.RectShape(size)) => Some(size)
@@ -309,24 +287,25 @@ mod SceneTree {
     // ========================================================================
 
     pub def collectBodies(node: Node): List[BodyInfo] =
-        collectBodiesHelper(node, Vec2D.zero())
+        collectBodiesWithGroup(node, Vec2D.zero(), "")
 
-    def extractShapes(name: String, globalPos: Vec2D.Vec2, isSolid: Bool, destroyed: Bool, kind: NodeKind, group: String, children: List[Node]): List[BodyInfo] =
+    def extractShapes(name: String, globalPos: Vec2D.Vec2, isSolid: Bool, kind: NodeKind, group: String, children: List[Node]): List[BodyInfo] =
         List.filterMap(child -> match nodeKind(child) {
             case NodeKind.Shape(shape) => Some({
                 name = name,
                 position = globalPos,
                 shape = shape,
                 isSolid = isSolid,
-                destroyed = destroyed,
                 kind = kind,
                 group = group
             })
             case _ => None
         }, children)
 
-    def collectBodiesHelper(node: Node, parentPos: Vec2D.Vec2): List[BodyInfo] =
-        collectBodiesWithGroup(node, parentPos, "")
+    def collectBodyShapes(name: String, globalPos: Vec2D.Vec2, isSolid: Bool, kind: NodeKind, group: String, children: List[Node]): List[BodyInfo] =
+        let shapes = extractShapes(name, globalPos, isSolid, kind, group, children);
+        let childBodies = List.flatMap(child -> collectBodiesWithGroup(child, globalPos, group), children);
+        List.append(shapes, childBodies)
 
     def collectBodiesWithGroup(node: Node, parentPos: Vec2D.Vec2, group: String): List[BodyInfo] =
         let Node.MkNode(name, pos, kind, children) = node;
@@ -334,19 +313,11 @@ mod SceneTree {
         match kind {
             case NodeKind.Fixed(bd) =>
                 if (bd#destroyed) Nil
-                else {
-                    let shapes = extractShapes(name, globalPos, bd#isSolid, bd#destroyed, kind, group, children);
-                    let childBodies = List.flatMap(child -> collectBodiesWithGroup(child, globalPos, group), children);
-                    List.append(shapes, childBodies)
-                }
+                else collectBodyShapes(name, globalPos, bd#isSolid, kind, group, children)
             case NodeKind.Kinematic(_) =>
-                let shapes = extractShapes(name, globalPos, true, false, kind, group, children);
-                let childBodies = List.flatMap(child -> collectBodiesWithGroup(child, globalPos, group), children);
-                List.append(shapes, childBodies)
+                collectBodyShapes(name, globalPos, true, kind, group, children)
             case NodeKind.Area =>
-                let shapes = extractShapes(name, globalPos, false, false, kind, group, children);
-                let childBodies = List.flatMap(child -> collectBodiesWithGroup(child, globalPos, group), children);
-                List.append(shapes, childBodies)
+                collectBodyShapes(name, globalPos, false, kind, group, children)
             case NodeKind.Plain =>
                 List.flatMap(child -> collectBodiesWithGroup(child, globalPos, name), children)
             case NodeKind.Rigid(_) =>
@@ -441,40 +412,14 @@ mod SceneTree {
         }
 
     // ========================================================================
-    // Engine: physicsStep (pure — no effects)
+    // Engine: stepAndCollide (physics step + collision signals)
     // ========================================================================
 
-    pub def physicsStep(scene: Scene[Pre], dt: Float32, config: PhysicsConfig): Scene[Post] =
-        let Scene.MkScene(root) = scene;
-        let movedRoot = physicsStepNode(root, dt, config);
-        let events = detectCollisions(movedRoot);
-        Scene.MkScene(resolveDetectedCollisions(movedRoot, events))
-
-    // ========================================================================
-    // Engine: emitCollisions (fire OnCollision effects)
-    // ========================================================================
-
-    pub def emitCollisions(scene: Scene[Pre], dt: Float32, config: PhysicsConfig): Unit \ OnCollision =
-        let Scene.MkScene(root) = scene;
-        let movedRoot = physicsStepNode(root, dt, config);
-        let events = detectCollisions(movedRoot);
-        List.forEach(event -> fireCollisionSignal(event), events)
-
-    // ========================================================================
-    // Engine: High-level API (hides phantom types)
-    // ========================================================================
-
-    /// Physics step + collision signal emission in one call.
-    /// Physics is computed once; phantom types enforce correctness internally.
     pub def stepAndCollide(node: Node, dt: Float32, config: PhysicsConfig): Node \ OnCollision =
         let movedRoot = physicsStepNode(node, dt, config);
         let events = detectCollisions(movedRoot);
         List.forEach(event -> fireCollisionSignal(event), events);
         resolveDetectedCollisions(movedRoot, events)
-
-    /// Physics step only (no collision signals).
-    pub def advancePhysics(node: Node, dt: Float32, config: PhysicsConfig): Node =
-        sceneNode(physicsStep(pre(node), dt, config))
 
     def physicsStepNode(node: Node, dt: Float32, config: PhysicsConfig): Node =
         let Node.MkNode(name, pos, kind, children) = node;
