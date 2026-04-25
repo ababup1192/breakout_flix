@@ -1,15 +1,11 @@
 // BreakoutScene — scene construction, accessor APIs, and rendering effects
 
 mod BreakoutScene {
-    // ========================================================================
-    // Node Name Constants (module-private)
-    // ========================================================================
-
-    def ballName(): String = "Ball"
-    def paddleName(): String = "Paddle"
-    def bricksName(): String = "Bricks"
-    def deathZoneName(): String = "DeathZone"
-    def rootName(): String = "Root"
+    pub def ballName(): String = "Ball"
+    pub def paddleName(): String = "Paddle"
+    pub def bricksName(): String = "Bricks"
+    pub def deathZoneName(): String = "DeathZone"
+    pub def rootName(): String = "Root"
 
     // ========================================================================
     // Scene Building
@@ -128,32 +124,6 @@ mod BreakoutScene {
         }
 
     // ========================================================================
-    // Read APIs (single-field convenience)
-    // ========================================================================
-
-    pub def ballPos(scene: SceneTree.Node): Vec2D.Vec2 =
-        (ballSnapshot(scene))#pos
-
-    pub def isBallStuck(scene: SceneTree.Node): Bool =
-        (ballSnapshot(scene))#stuck
-
-    pub def paddlePos(scene: SceneTree.Node): Vec2D.Vec2 =
-        (paddleSnapshot(scene))#pos
-
-    pub def paddleSize(scene: SceneTree.Node): Vec2D.Vec2 =
-        (paddleSnapshot(scene))#size
-
-    pub def brickNodes(scene: SceneTree.Node): List[SceneTree.Node] =
-        SceneTree.findNode(bricksName(), scene)
-            |> Option.map(SceneTree.nodeChildren)
-            |> Option.getWithDefault(Nil)
-
-    pub def deathZoneY(scene: SceneTree.Node): Float32 =
-        SceneTree.findNode(deathZoneName(), scene)
-            |> Option.map(n -> (SceneTree.nodePosition(n))#y)
-            |> Option.getWithDefault(Int32.toFloat32(Game.screenHeight()))
-
-    // ========================================================================
     // Write APIs
     // ========================================================================
 
@@ -162,36 +132,8 @@ mod BreakoutScene {
             _ -> {velocity = vel},
             scene)
 
-    pub def setBallVelocity(vel: Vec2D.Vec2, scene: SceneTree.Node): SceneTree.Node =
-        SceneTree.updateRigidBody(ballName(),
-            bd -> {velocity = vel | bd},
-            scene)
-
-    pub def setBallPosition(pos: Vec2D.Vec2, scene: SceneTree.Node): SceneTree.Node =
-        SceneTree.setNodePosition(ballName(), pos, scene)
-
     pub def updateBall(f: SceneTree.RigidBodyData -> SceneTree.RigidBodyData, scene: SceneTree.Node): SceneTree.Node =
         SceneTree.updateRigidBody(ballName(), f, scene)
-
-    pub def replaceBricks(bricks: List[SceneTree.Node], scene: SceneTree.Node): SceneTree.Node =
-        let newBricksNode = SceneTree.node2D(bricksName(), Vec2D.zero(), bricks);
-        SceneTree.mapNode(bricksName(), _ -> newBricksNode, scene)
-
-    // ========================================================================
-    // Brick Inspection
-    // ========================================================================
-
-    pub type alias BrickRect = { pos = Vec2D.Vec2, size = Vec2D.Vec2 }
-
-    pub def brickRect(brickNode: SceneTree.Node): BrickRect =
-        {
-            pos = SceneTree.nodePosition(brickNode),
-            size = SceneTree.findRectShape(SceneTree.nodeChildren(brickNode))
-                |> Option.getWithDefault(Vec2D.zero())
-        }
-
-    pub def brickBodyData(brickNode: SceneTree.Node): Option[SceneTree.StaticBodyData] =
-        SceneTree.staticBodyData(brickNode)
 
     // ========================================================================
     // Physics Step
@@ -209,10 +151,6 @@ mod BreakoutScene {
     pub def stepAndCollide(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.Node \ SceneTree.OnCollision =
         SceneTree.stepAndCollide(scene, dt, physicsConfig(scene, screenSize))
 
-    /// Physics only (no collision signals). For tests etc.
-    pub def advancePhysics(scene: SceneTree.Node, dt: Float32, screenSize: Vec2D.Vec2): SceneTree.Node =
-        SceneTree.advancePhysics(scene, dt, physicsConfig(scene, screenSize))
-
     pub def destroyBrick(blick: SceneTree.BodyContact, scene: SceneTree.Node): SceneTree.Node =
         SceneTree.updateStaticBody(blick#name, bd -> {destroyed = true | bd}, scene)
 
@@ -220,9 +158,9 @@ mod BreakoutScene {
     // Rendering: apply shake offset
     // ========================================================================
 
-    pub def applyShake(state: Game.GameState): SceneTree.Node =
-        let shake = shakeOffset(state#shakeTime);
-        SceneTree.setNodePosition(rootName(), shake, state#scene)
+    pub def applyShake(shakeTime: Float32, scene: SceneTree.Node): SceneTree.Node =
+        let shake = shakeOffset(shakeTime);
+        SceneTree.setNodePosition(rootName(), shake, scene)
 
     // ========================================================================
     // Shake calculation

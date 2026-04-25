@@ -154,7 +154,7 @@ mod Game {
         if (Game.shouldClose()) state
         else {
             let newState = updateGame(state);
-            let renderScene = BreakoutScene.applyShake(newState);
+            let renderScene = BreakoutScene.applyShake(newState#shakeTime, newState#scene);
             Game.render(renderScene);
             runLoop(newState)
         }
@@ -171,30 +171,6 @@ mod Game {
             |> applyCollisions(dt, screenSize)
             |> tickShake(dt)
 
-    def applyCollisions(dt: Float32, screenSize: Vec2D.Vec2, state: GameState): GameState =
-        run {
-            let newScene = BreakoutScene.stepAndCollide(state#scene, dt, screenSize);
-            {scene = newScene | state}
-        } with handler SceneTree.OnCollision {
-            def bodyEntered(nodeName, selfPos, body, k) =
-                let s = k(());
-                match nodeName {
-                    case "Ball" => onBallBodyEntered(selfPos, body, s)
-                    case _ => s
-                }
-            def areaEntered(nodeName, _selfPos, body, k) =
-                let s = k(());
-                match nodeName {
-                    case "Ball" => onBallAreaEntered(body, s)
-                    case _ => s
-                }
-        }
-
-    pub def tickShake(dt: Float32, state: GameState): GameState =
-        if (state#shakeTime > 0.0f32)
-            {shakeTime = Float32.max(0.0f32, state#shakeTime - dt) | state}
-        else state
-
     // ========================================================================
     // Input Processing
     // ========================================================================
@@ -208,38 +184,55 @@ mod Game {
             {scene = BreakoutScene.updateBall(bd -> {stuck = false | bd}, s1#scene) | s1}
         } else s1
 
+
+    pub def applyCollisions(dt: Float32, screenSize: Vec2D.Vec2, state: GameState): GameState =
+        run {
+            let newScene = BreakoutScene.stepAndCollide(state#scene, dt, screenSize);
+            {scene = newScene | state}
+        } with handler SceneTree.OnCollision {
+            def bodyEntered(nodeName, selfPos, body, k) =
+                let s = k(());
+                if (nodeName == BreakoutScene.ballName()) 
+                    onBallBodyEntered(selfPos, body, s)
+                else s
+            def areaEntered(nodeName, _selfPos, body, k) =
+                let s = k(());
+                if (nodeName == BreakoutScene.ballName())
+                    onBallAreaEntered(body, s)
+                else s
+        }
     // ========================================================================
     // Collision Handlers (Godot _on_*_entered style)
     // ========================================================================
 
     def onBallBodyEntered(selfPos: Vec2D.Vec2, body: SceneTree.BodyContact,
                           state: GameState): GameState =
-        match body#name {
-            case "Paddle" =>
-                let ball = BreakoutScene.ballSnapshot(state#scene);
-                let direction = Vec2D.normalized(Vec2D.sub(selfPos, body#position));
-                let speed = Vec2D.length(ball#vel);
-                let newVel = Vec2D.mul(direction, speed);
-                let scene1 = BreakoutScene.setBallVelocity(newVel, state#scene);
-                {scene = scene1 | state}
-            case _ if body#group == "Bricks" =>
-                if (body#isSolid)
-                    {shakeTime = 0.15f32 | state}
-                else {
-                    let scene = BreakoutScene.destroyBrick(body, state#scene);
-                    {scene = scene | state}
-                }
-            case _ => state
-        }
+        if(body#name == BreakoutScene.paddleName()) {
+            let ball = BreakoutScene.ballSnapshot(state#scene);
+            let direction = Vec2D.normalized(Vec2D.sub(selfPos, body#position));
+            let speed = Vec2D.length(ball#vel);
+            let newVel = Vec2D.mul(direction, speed);
+            let scene1 = BreakoutScene.updateBall(bd -> {velocity = newVel | bd}, state#scene);
+            {scene = scene1 | state}
+        } else if(body#group == BreakoutScene.bricksName()) {
+            if (body#isSolid)
+                {shakeTime = 0.15f32 | state}
+            else 
+                let scene = BreakoutScene.destroyBrick(body, state#scene);
+                {scene = scene | state}
+         } else state
 
     def onBallAreaEntered(body: SceneTree.BodyContact,
                           state: GameState): GameState =
-        match body#name {
-            case "DeathZone" =>
-                let scene1 = BreakoutScene.updateBall(
-                    _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
-                          stuck = true}, state#scene);
-                {scene = scene1 | state}
-            case _ => state
-        }
+        if(body#name == BreakoutScene.deathZoneName())
+            let scene1 = BreakoutScene.updateBall(
+                _ -> {velocity = {x = initialBallVelocityX(), y = initialBallVelocityY()},
+                        stuck = true}, state#scene);
+            {scene = scene1 | state}
+        else state
+
+    pub def tickShake(dt: Float32, state: GameState): GameState =
+        if (state#shakeTime > 0.0f32)
+            {shakeTime = Float32.max(0.0f32, state#shakeTime - dt) | state}
+        else state
 }

@@ -5,7 +5,7 @@ use Game.{parseLevelLine, parseLevel, initGame,
           playerWidth, playerHeight, ballRadiusConst,
           screenWidth, screenHeight,
           initialBallVelocityX, initialBallVelocityY,
-          processInput,
+          processInput, applyCollisions,
           keyA, keyD, keySpace,
           tickShake}
 
@@ -74,14 +74,14 @@ def dummyFileRead(f: Unit -> a \ ef): a \ ef - Fs.FileRead =
 @Test
 def testInitGamePaddlePosition(): Unit \ Assert =
     let state = run { initGame(800, 600) } with dummyFileRead;
-    let pos = BreakoutScene.paddlePos(state#scene);
+    let pos = (BreakoutScene.paddleSnapshot(state#scene))#pos;
     Assert.assertEq(expected = 350.0f32, pos#x);
     Assert.assertEq(expected = 580.0f32, pos#y)
 
 @Test
 def testInitGameBallPosition(): Unit \ Assert =
     let state = run { initGame(800, 600) } with dummyFileRead;
-    let pos = BreakoutScene.ballPos(state#scene);
+    let pos = (BreakoutScene.ballSnapshot(state#scene))#pos;
     Assert.assertEq(expected = 387.5f32, pos#x);
     Assert.assertEq(expected = 555.0f32, pos#y)
 
@@ -95,7 +95,7 @@ def testInitGameBallVelocity(): Unit \ Assert =
 @Test
 def testInitGameBallStuck(): Unit \ Assert =
     let state = run { initGame(800, 600) } with dummyFileRead;
-    Assert.assertTrue(BreakoutScene.isBallStuck(state#scene))
+    Assert.assertTrue((BreakoutScene.ballSnapshot(state#scene))#stuck)
 
 // --- Scene tree based test state helper ---
 
@@ -156,12 +156,16 @@ def mkTestStateWithShake(
 
 def testScreenSize(): Vec2D.Vec2 = {x = 800.0f32, y = 600.0f32}
 
+def testAdvancePhysics(scene: SceneTree.Node, dt: Float32, paddlePos: Vec2D.Vec2): SceneTree.Node =
+    let config: SceneTree.PhysicsConfig = {screenSize = testScreenSize(), anchorPos = paddlePos, anchorWidth = playerWidth()};
+    SceneTree.advancePhysics(scene, dt, config)
+
 @Test
 def testPhysicsStepBallStuck(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
-    let newRoot = BreakoutScene.advancePhysics(state#scene, 0.016f32, testScreenSize());
+    let newRoot = testAdvancePhysics(state#scene, 0.016f32, {x = 350.0f32, y = 580.0f32});
     let result = {scene = newRoot | state};
-    let pos = BreakoutScene.ballPos(result#scene);
+    let pos = (BreakoutScene.ballSnapshot(result#scene))#pos;
     let expectedX = 350.0f32 + playerWidth() / 2.0f32 - ballRadiusConst();
     let expectedY = 580.0f32 - ballRadiusConst() * 2.0f32;
     Assert.assertEq(expected = expectedX, pos#x);
@@ -170,18 +174,18 @@ def testPhysicsStepBallStuck(): Unit \ Assert =
 @Test
 def testPhysicsStepBallNormal(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 300.0f32, 100.0f32, -350.0f32, false);
-    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let newRoot = testAdvancePhysics(state#scene, 1.0f32, {x = 350.0f32, y = 580.0f32});
     let result = {scene = newRoot | state};
-    let pos = BreakoutScene.ballPos(result#scene);
+    let pos = (BreakoutScene.ballSnapshot(result#scene))#pos;
     Assert.assertEq(expected = 500.0f32, pos#x);
     Assert.assertEq(expected = 0.0f32, pos#y)
 
 @Test
 def testPhysicsStepBallLeftWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 5.0f32, 300.0f32, -100.0f32, 0.0f32, false);
-    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let newRoot = testAdvancePhysics(state#scene, 1.0f32, {x = 350.0f32, y = 580.0f32});
     let result = {scene = newRoot | state};
-    let pos = BreakoutScene.ballPos(result#scene);
+    let pos = (BreakoutScene.ballSnapshot(result#scene))#pos;
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#x);
     Assert.assertTrue(vel#x > 0.0f32)
@@ -191,9 +195,9 @@ def testPhysicsStepBallRightWall(): Unit \ Assert =
     let ballSize = ballRadiusConst() * 2.0f32;
     let startX = Int32.toFloat32(screenWidth()) - ballSize - 10.0f32;
     let state = mkTestState(350.0f32, 580.0f32, startX, 300.0f32, 200.0f32, 0.0f32, false);
-    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let newRoot = testAdvancePhysics(state#scene, 1.0f32, {x = 350.0f32, y = 580.0f32});
     let result = {scene = newRoot | state};
-    let pos = BreakoutScene.ballPos(result#scene);
+    let pos = (BreakoutScene.ballSnapshot(result#scene))#pos;
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = Int32.toFloat32(screenWidth()) - ballSize, pos#x);
     Assert.assertTrue(vel#x < 0.0f32)
@@ -201,9 +205,9 @@ def testPhysicsStepBallRightWall(): Unit \ Assert =
 @Test
 def testPhysicsStepBallTopWall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 5.0f32, 0.0f32, -100.0f32, false);
-    let newRoot = BreakoutScene.advancePhysics(state#scene, 1.0f32, testScreenSize());
+    let newRoot = testAdvancePhysics(state#scene, 1.0f32, {x = 350.0f32, y = 580.0f32});
     let result = {scene = newRoot | state};
-    let pos = BreakoutScene.ballPos(result#scene);
+    let pos = (BreakoutScene.ballSnapshot(result#scene))#pos;
     let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
     Assert.assertEq(expected = 0.0f32, pos#y);
     Assert.assertTrue(vel#y > 0.0f32)
@@ -213,10 +217,10 @@ def testPhysicsStepBallTopWall(): Unit \ Assert =
 @Test
 def testCheckDeathZoneInBounds(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 400.0f32, 300.0f32, 100.0f32, -350.0f32, false);
-    let pos = BreakoutScene.ballPos(state#scene);
+    let pos = (BreakoutScene.ballSnapshot(state#scene))#pos;
     Assert.assertEq(expected = 400.0f32, pos#x);
     Assert.assertEq(expected = 300.0f32, pos#y);
-    Assert.assertFalse(BreakoutScene.isBallStuck(state#scene))
+    Assert.assertFalse((BreakoutScene.ballSnapshot(state#scene))#stuck)
 
 // --- processInput ---
 
@@ -253,7 +257,7 @@ def testProcessInputSetsPaddleVelocityRight(): Unit \ Assert =
 def testProcessInputLaunchBall(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
     let result = run { processInput(state) } with withMockInput(Set#{keySpace()});
-    Assert.assertFalse(BreakoutScene.isBallStuck(result#scene))
+    Assert.assertFalse((BreakoutScene.ballSnapshot(result#scene))#stuck)
 
 // --- tickShake ---
 
@@ -274,3 +278,133 @@ def testTickShakeAlreadyZero(): Unit \ Assert =
     let state = mkTestState(350.0f32, 580.0f32, 387.5f32, 555.0f32, 100.0f32, -350.0f32, true);
     let result = tickShake(0.016f32, state);
     Assert.assertEq(expected = 0.0f32, result#shakeTime)
+
+// --- Collision test helpers ---
+
+def mkBrick(name: String, pos: Vec2D.Vec2, size: Vec2D.Vec2, isSolid: Bool): SceneTree.Node =
+    SceneTree.staticBody2D(
+        name, pos,
+        {isSolid = isSolid, destroyed = false},
+        SceneTree.sprite2D("${name}_Sprite", Vec2D.zero(),
+            {size = size, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32},
+             texture = if (isSolid) "block_solid" else "block", visible = true}
+        ) ::
+        SceneTree.collisionShape2D("${name}_Collider",
+            SceneTree.CollisionShapeData.RectShape(size)
+        ) :: Nil
+    )
+
+def mkTestStateWithBricks(
+    px: Float32, py: Float32,
+    bx: Float32, by: Float32,
+    vx: Float32, vy: Float32,
+    stuck: Bool,
+    bricks: List[SceneTree.Node]
+): Game.GameState =
+    let scene = SceneTree.node2D("Root", Vec2D.zero(),
+        SceneTree.node2D("Bricks", Vec2D.zero(), bricks) ::
+        SceneTree.kinematicBody2D("Paddle",
+            {x = px, y = py},
+            {velocity = Vec2D.zero()},
+            SceneTree.sprite2D("PaddleSprite", Vec2D.zero(),
+                {size = {x = playerWidth(), y = playerHeight()}, color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "paddle", visible = true}
+            ) ::
+            SceneTree.collisionShape2D("PaddleCollider",
+                SceneTree.CollisionShapeData.RectShape({x = playerWidth(), y = playerHeight()})
+            ) :: Nil
+        ) ::
+        SceneTree.rigidBody2D("Ball",
+            {x = bx, y = by},
+            {velocity = {x = vx, y = vy}, stuck = stuck},
+            SceneTree.sprite2D("BallSprite", Vec2D.zero(),
+                {size = {x = ballRadiusConst() * 2.0f32, y = ballRadiusConst() * 2.0f32},
+                 color = {r = 1.0f32, g = 1.0f32, b = 1.0f32}, texture = "ball", visible = true}
+            ) ::
+            SceneTree.collisionShape2D("BallCollider",
+                SceneTree.CollisionShapeData.CircleShape(ballRadiusConst())
+            ) :: Nil
+        ) ::
+        SceneTree.area2D("DeathZone",
+            {x = 0.0f32, y = Int32.toFloat32(screenHeight())},
+            SceneTree.collisionShape2D("DeathZoneShape",
+                SceneTree.CollisionShapeData.RectShape({x = Int32.toFloat32(screenWidth()), y = 20.0f32})
+            ) :: Nil
+        )
+        :: Nil
+    );
+    {
+        scene = scene,
+        levels = Nil,
+        currentLevel = 0,
+        shakeTime = 0.0f32
+    }
+
+// --- applyCollisions tests ---
+
+// Ball(380,558) r=12.5 overlaps Paddle(350,580) 100x20
+@Test
+def testApplyCollisionsBallHitsPaddleRedirectsVelocity(): Unit \ Assert =
+    let state = mkTestState(350.0f32, 580.0f32, 380.0f32, 558.0f32, 100.0f32, 350.0f32, false);
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let vy = (BreakoutScene.ballSnapshot(result#scene))#vel#y;
+    Assert.assertTrue(vy < 0.0f32)
+
+@Test
+def testApplyCollisionsBallHitsPaddlePreservesSpeed(): Unit \ Assert =
+    let state = mkTestState(350.0f32, 580.0f32, 380.0f32, 558.0f32, 100.0f32, 350.0f32, false);
+    let speedBefore = Vec2D.length({x = 100.0f32, y = 350.0f32});
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
+    let speedAfter = Vec2D.length(vel);
+    let diff = Float32.abs(speedAfter - speedBefore);
+    Assert.assertTrue(diff < 1.0f32)
+
+// Ball(127.5,83) r=12.5 overlaps Brick(100,100) 80x20
+@Test
+def testApplyCollisionsBallHitsNonSolidBrickDestroys(): Unit \ Assert =
+    let brick = mkBrick("Brick_0", {x = 100.0f32, y = 100.0f32}, {x = 80.0f32, y = 20.0f32}, false);
+    let state = mkTestStateWithBricks(350.0f32, 580.0f32, 127.5f32, 83.0f32, 0.0f32, 350.0f32, false, brick :: Nil);
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let brickNode = SceneTree.findNode("Brick_0", result#scene);
+    let destroyed = brickNode |> Option.flatMap(SceneTree.staticBodyData) |> Option.map(bd -> bd#destroyed);
+    Assert.assertEq(expected = Some(true), destroyed)
+
+@Test
+def testApplyCollisionsBallHitsSolidBrickSetsShake(): Unit \ Assert =
+    let brick = mkBrick("Brick_0", {x = 100.0f32, y = 100.0f32}, {x = 80.0f32, y = 20.0f32}, true);
+    let state = mkTestStateWithBricks(350.0f32, 580.0f32, 127.5f32, 83.0f32, 0.0f32, 350.0f32, false, brick :: Nil);
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    Assert.assertEq(expected = 0.15f32, result#shakeTime)
+
+@Test
+def testApplyCollisionsBallHitsSolidBrickNotDestroyed(): Unit \ Assert =
+    let brick = mkBrick("Brick_0", {x = 100.0f32, y = 100.0f32}, {x = 80.0f32, y = 20.0f32}, true);
+    let state = mkTestStateWithBricks(350.0f32, 580.0f32, 127.5f32, 83.0f32, 0.0f32, 350.0f32, false, brick :: Nil);
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let brickNode = SceneTree.findNode("Brick_0", result#scene);
+    let destroyed = brickNode |> Option.flatMap(SceneTree.staticBodyData) |> Option.map(bd -> bd#destroyed);
+    Assert.assertEq(expected = Some(false), destroyed)
+
+// Ball(50,585) r=12.5 overlaps DeathZone(0,600) but NOT Paddle(350,580)
+@Test
+def testApplyCollisionsBallEntersDeathZoneResetsStuck(): Unit \ Assert =
+    let state = mkTestState(350.0f32, 580.0f32, 50.0f32, 585.0f32, 100.0f32, 350.0f32, false);
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    Assert.assertTrue((BreakoutScene.ballSnapshot(result#scene))#stuck)
+
+@Test
+def testApplyCollisionsBallEntersDeathZoneResetsVelocity(): Unit \ Assert =
+    let state = mkTestState(350.0f32, 580.0f32, 50.0f32, 585.0f32, 100.0f32, 350.0f32, false);
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let vel = (BreakoutScene.ballSnapshot(result#scene))#vel;
+    Assert.assertEq(expected = initialBallVelocityX(), vel#x);
+    Assert.assertEq(expected = initialBallVelocityY(), vel#y)
+
+@Test
+def testApplyCollisionsStuckBallNoEvents(): Unit \ Assert =
+    let brick = mkBrick("Brick_0", {x = 100.0f32, y = 100.0f32}, {x = 80.0f32, y = 20.0f32}, false);
+    let state = mkTestStateWithBricks(350.0f32, 580.0f32, 127.5f32, 83.0f32, 0.0f32, 350.0f32, true, brick :: Nil);
+    let result = applyCollisions(0.001f32, testScreenSize(), state);
+    let brickNode = SceneTree.findNode("Brick_0", result#scene);
+    let destroyed = brickNode |> Option.flatMap(SceneTree.staticBodyData) |> Option.map(bd -> bd#destroyed);
+    Assert.assertEq(expected = Some(false), destroyed)
