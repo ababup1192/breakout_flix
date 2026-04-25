@@ -478,3 +478,245 @@ def testDetectCollisionsAreaContainsNode(): Unit \ Assert =
     let events = SceneTree.detectCollisions(root);
     let areaName = List.head(events) |> Option.map(e -> SceneTree.nodeName(e#area));
     Assert.assertEq(expected = Some("Ball"), areaName)
+
+// ========================================================================
+// Node 特性テスト
+// ========================================================================
+
+// --- Node2D (Plain) ---
+// 描画も物理データも持たない、純粋なコンテナノード。
+// 自身の名前が子ノードの group になる（"Enemies" の下に並べれば全員 group="Enemies"）。
+// 物理ステップで子ノードへ再帰するのは Node2D だけ。他のノードは自分自身を処理して終わる。
+
+// Node2D の名前が、子ボディの group フィールドに伝搬する
+@Test
+def testNode2DGroupPropagation(): Unit \ Assert =
+    let group = node2D("Enemies", Vec2D.zero(),
+        staticBody2D("E1", mkPos(0.0f32, 0.0f32),
+            {isSolid = false, destroyed = false},
+            collisionShape2D("C1", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) :: Nil
+        ) ::
+        staticBody2D("E2", mkPos(100.0f32, 0.0f32),
+            {isSolid = false, destroyed = false},
+            collisionShape2D("C2", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) :: Nil
+        ) ::
+        Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), group :: Nil);
+    let bodies = SceneTree.collectBodies(root);
+    let groups = List.map(b -> b#group, bodies);
+    Assert.assertEq(expected = "Enemies" :: "Enemies" :: Nil, groups)
+
+// Node2D 以外のノードは子ノードへ物理処理を再帰しない。
+// KinematicBody2D の中に KinematicBody2D を入れても、内側の速度は適用されない。
+@Test
+def testNonPlainNodeDoesNotRecursePhysics(): Unit \ Assert =
+    let innerKinematic = kinematicBody2D("Inner", mkPos(50.0f32, 50.0f32),
+        {velocity = {x = 1000.0f32, y = 0.0f32}},
+        Nil
+    );
+    let outerKinematic = kinematicBody2D("Outer", mkPos(100.0f32, 200.0f32),
+        {velocity = Vec2D.zero()},
+        innerKinematic :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), outerKinematic :: Nil);
+    let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = Vec2D.zero(), anchorWidth = 100.0f32};
+    let newRoot = run {
+        SceneTree.stepAndCollide(root, 1.0f32, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    };
+    let innerPos = SceneTree.findNode("Inner", newRoot) |> Option.map(SceneTree.nodePosition);
+    let px = innerPos |> Option.map(p -> p#x);
+    Assert.assertEq(expected = Some(50.0f32), px)
+
+// --- CollisionShape2D (Shape) ---
+// 衝突判定の「形」を定義するノード（矩形 or 円）。
+// 描画されることはない。見えない当たり判定。
+// 必ずボディノード（Kinematic, Rigid, Static, Area）の子として配置する。
+
+// Sprite と Shape を並べても、collectDrawables に入るのは Sprite だけ
+@Test
+def testCollisionShapeProducesNoDrawable(): Unit \ Assert =
+    let root = node2D("Root", Vec2D.zero(),
+        sprite2D("Vis", Vec2D.zero(), mkSpriteData("block")) ::
+        collisionShape2D("Shape", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) ::
+        Nil
+    );
+    let result = collectDrawables(root, Vec2D.zero());
+    Assert.assertEq(expected = 1, List.length(result))
+
+// Shape を Node2D 直下に置いても collectBodies に含まれない（ボディではないため）
+@Test
+def testCollisionShapeNotCollectedAsBody(): Unit \ Assert =
+    let root = node2D("Root", Vec2D.zero(),
+        collisionShape2D("Shape", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) ::
+        Nil
+    );
+    let bodies = SceneTree.collectBodies(root);
+    Assert.assertEq(expected = 0, List.length(bodies))
+
+// --- KinematicBody2D (Kinematic) ---
+// 外部入力で操作されるボディ。速度に従って移動する。
+// 画面端でクランプされる（左端=0、右端=画面幅-自身の幅）。跳ね返りはしない。
+// collectBodies では isSolid=true の「壊せない壁」として扱われる。
+
+// 極端に大きな負の速度を与えても、X座標は 0 で止まる（画面外に出ない）
+@Test
+def testKinematicBodyStopsAtScreenEdge(): Unit \ Assert =
+    let body = kinematicBody2D("Player", mkPos(100.0f32, 300.0f32),
+        {velocity = {x = -10000.0f32, y = 0.0f32}},
+        collisionShape2D("Collider", SceneTree.CollisionShapeData.RectShape({x = 100.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), body :: Nil);
+    let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = mkPos(100.0f32, 300.0f32), anchorWidth = 100.0f32};
+    let newRoot = run {
+        SceneTree.stepAndCollide(root, 0.1f32, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    };
+    let pos = SceneTree.globalPosition("Player", newRoot);
+    let px = pos |> Option.map(p -> p#x);
+    Assert.assertEq(expected = Some(0.0f32), px)
+
+// collectBodies で KinematicBody2D は常に isSolid=true になる
+@Test
+def testKinematicBodyAlwaysSolid(): Unit \ Assert =
+    let body = kinematicBody2D("Player", mkPos(100.0f32, 300.0f32),
+        {velocity = Vec2D.zero()},
+        collisionShape2D("Collider", SceneTree.CollisionShapeData.RectShape({x = 100.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), body :: Nil);
+    let bodies = SceneTree.collectBodies(root);
+    Assert.assertEq(expected = 1, List.length(bodies));
+    let solid = List.head(bodies) |> Option.map(b -> b#isSolid);
+    Assert.assertEq(expected = Some(true), solid)
+
+// --- RigidBody2D (Rigid) ---
+// 速度で自律移動する物理ボディ。
+// stuck=true: アンカー（KinematicBody2D）の上に固定される。衝突判定の対象外。
+// stuck=false: 速度で飛び回り、画面の左壁・右壁・上壁で速度が反転する。
+// collectBodies には含まれない（衝突の「発信者」であり「受信者」ではない）。
+// collectRigidBodies にのみ含まれる。
+
+// 左壁に衝突すると X=0 にクランプされ、X速度が正方向に反転する
+@Test
+def testRigidBodyReflectsOffLeftWall(): Unit \ Assert =
+    let body = rigidBody2D("Projectile", mkPos(5.0f32, 300.0f32),
+        {velocity = {x = -200.0f32, y = 0.0f32}, stuck = false},
+        collisionShape2D("Collider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), body :: Nil);
+    let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = Vec2D.zero(), anchorWidth = 100.0f32};
+    let newRoot = run {
+        SceneTree.stepAndCollide(root, 0.1f32, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    };
+    let pos = SceneTree.globalPosition("Projectile", newRoot);
+    let px = pos |> Option.map(p -> p#x);
+    Assert.assertEq(expected = Some(0.0f32), px);
+    let vx = SceneTree.findNode("Projectile", newRoot)
+        |> Option.flatMap(SceneTree.rigidBodyData)
+        |> Option.map(bd -> bd#velocity#x)
+        |> Option.getWithDefault(0.0f32);
+    Assert.assertTrue(vx > 0.0f32)
+
+// RigidBody2D は collectBodies には入らず、collectRigidBodies にだけ入る
+@Test
+def testRigidBodyNotInCollectBodies(): Unit \ Assert =
+    let body = rigidBody2D("Projectile", mkPos(100.0f32, 100.0f32),
+        {velocity = {x = 100.0f32, y = -200.0f32}, stuck = false},
+        collisionShape2D("Collider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), body :: Nil);
+    let bodies = SceneTree.collectBodies(root);
+    Assert.assertEq(expected = 0, List.length(bodies));
+    let rigids = SceneTree.collectRigidBodies(root);
+    Assert.assertEq(expected = 1, List.length(rigids))
+
+// --- StaticBody2D (Fixed) ---
+// 動かないボディ。位置は固定。
+// destroyed=true で描画・衝突判定ともに完全スキップ（存在しないのと同じ）。
+// isSolid フラグが collectBodies の結果にそのまま反映される。
+
+// isSolid=true/false がそれぞれ collectBodies の結果に正しく伝わる
+@Test
+def testStaticBodyIsSolidPropagation(): Unit \ Assert =
+    let solidWall = staticBody2D("Wall", mkPos(0.0f32, 0.0f32),
+        {isSolid = true, destroyed = false},
+        collisionShape2D("WC", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) :: Nil
+    );
+    let fragileBox = staticBody2D("Box", mkPos(100.0f32, 0.0f32),
+        {isSolid = false, destroyed = false},
+        collisionShape2D("BC", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), solidWall :: fragileBox :: Nil);
+    let bodies = SceneTree.collectBodies(root);
+    Assert.assertEq(expected = 2, List.length(bodies));
+    let solidFlag = List.find(b -> b#name == "Wall", bodies) |> Option.map(b -> b#isSolid);
+    let fragileFlag = List.find(b -> b#name == "Box", bodies) |> Option.map(b -> b#isSolid);
+    Assert.assertEq(expected = Some(true), solidFlag);
+    Assert.assertEq(expected = Some(false), fragileFlag)
+
+// StaticBody2D は物理ステップ後も位置が変わらない
+@Test
+def testStaticBodyDoesNotMove(): Unit \ Assert =
+    let body = staticBody2D("Wall", mkPos(200.0f32, 100.0f32),
+        {isSolid = true, destroyed = false},
+        collisionShape2D("WC", SceneTree.CollisionShapeData.RectShape({x = 80.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), body :: Nil);
+    let config = {screenSize = {x = 800.0f32, y = 600.0f32}, anchorPos = Vec2D.zero(), anchorWidth = 100.0f32};
+    let newRoot = run {
+        SceneTree.stepAndCollide(root, 1.0f32, config)
+    } with handler SceneTree.OnCollision {
+        def bodyEntered(_, _, _, k) = k(())
+        def areaEntered(_, _, _, k) = k(())
+    };
+    let pos = SceneTree.globalPosition("Wall", newRoot);
+    let px = pos |> Option.map(p -> p#x);
+    let py = pos |> Option.map(p -> p#y);
+    Assert.assertEq(expected = Some(200.0f32), px);
+    Assert.assertEq(expected = Some(100.0f32), py)
+
+// --- Area2D (Area) ---
+// 描画されない検知エリア。物理的な実体を持たないセンサー。
+// collectBodies に含まれるが、isSolid は常に false。
+// 衝突時には bodyEntered ではなく areaEntered シグナルが発火する。
+
+// collectBodies に含まれ、isSolid は必ず false になる
+@Test
+def testArea2DCollectedAsBodyNotSolid(): Unit \ Assert =
+    let sensor = area2D("Sensor", mkPos(0.0f32, 590.0f32),
+        collisionShape2D("SensorCollider", SceneTree.CollisionShapeData.RectShape({x = 800.0f32, y = 10.0f32})) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), sensor :: Nil);
+    let bodies = SceneTree.collectBodies(root);
+    Assert.assertEq(expected = 1, List.length(bodies));
+    let solid = List.head(bodies) |> Option.map(b -> b#isSolid);
+    Assert.assertEq(expected = Some(false), solid)
+
+// Area2D との衝突イベントは targetKind が NodeKind.Area になる（= areaEntered の発火条件）
+@Test
+def testArea2DCollisionEventHasAreaKind(): Unit \ Assert =
+    let projectile = rigidBody2D("Projectile", mkPos(112.5f32, 83.0f32),
+        {velocity = {x = 0.0f32, y = 100.0f32}, stuck = false},
+        collisionShape2D("ProjCollider", SceneTree.CollisionShapeData.CircleShape(12.5f32)) :: Nil
+    );
+    let sensor = area2D("Sensor", mkPos(100.0f32, 100.0f32),
+        collisionShape2D("SensorCollider", SceneTree.CollisionShapeData.RectShape({x = 50.0f32, y = 20.0f32})) :: Nil
+    );
+    let root = node2D("Root", Vec2D.zero(), projectile :: sensor :: Nil);
+    let events = SceneTree.detectCollisions(root);
+    Assert.assertEq(expected = 1, List.length(events));
+    let isArea = List.head(events) |> Option.map(e ->
+        match e#targetKind {
+            case SceneTree.NodeKind.Area => true
+            case _ => false
+        }
+    );
+    Assert.assertEq(expected = Some(true), isArea)
