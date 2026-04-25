@@ -19,18 +19,6 @@ mod LwjglLayer {
     import java.lang.System
 
     // ============================================================================
-    // Textures
-    // ============================================================================
-
-    type alias Textures = {
-        background = Int32,
-        block = Int32,
-        blockSolid = Int32,
-        paddle = Int32,
-        ball = Int32
-    }
-
-    // ============================================================================
     // Shader Sources (LearnOpenGL sprite shader)
     // ============================================================================
 
@@ -122,26 +110,14 @@ mod LwjglLayer {
             textureID
         }
 
-    def loadTextures(): Textures \ IO =
-        println("Loading textures...");
-        let background = loadTexture("textures/background.jpg", false);
-        println("  background.jpg loaded");
-        let block = loadTexture("textures/block.png", true);
-        println("  block.png loaded");
-        let blockSolid = loadTexture("textures/block_solid.png", true);
-        println("  block_solid.png loaded");
-        let paddle = loadTexture("textures/paddle.png", true);
-        println("  paddle.png loaded");
-        let ball = loadTexture("textures/awesomeface.png", true);
-        println("  awesomeface.png loaded");
-
-        {
-            background = background,
-            block = block,
-            blockSolid = blockSolid,
-            paddle = paddle,
-            ball = ball
-        }
+    /// Load all textures from manifest into a registry (Map-based, data-driven)
+    def loadTextureRegistry(manifest: List[(String, String, Bool)]): Game.TextureRegistry \ IO =
+        List.foldLeft((registry, entry) -> {
+            let (name, path, alpha) = entry;
+            let texId = loadTexture(path, alpha);
+            println("  ${path} loaded");
+            Map.insert(name, texId, registry)
+        }, Map.empty(), manifest)
 
     // ============================================================================
     // Sprite Renderer
@@ -190,7 +166,7 @@ mod LwjglLayer {
         let loc = GL20.glGetUniformLocation(shader, "projection");
         GL20.glUniformMatrix4fv(loc, false, proj)
 
-    def drawSprite(shader: Int32, texture: Int32, vao: Int32, pos: Game.Vec2, size: Game.Vec2, color: Game.Vec3): Unit \ IO =
+    def drawSprite(shader: Int32, texture: Int32, vao: Int32, pos: Vec2D.Vec2, size: Vec2D.Vec2, color: Game.Vec3): Unit \ IO =
         GL20.glUseProgram(shader);
 
         let model = Array#{
@@ -214,51 +190,20 @@ mod LwjglLayer {
         GL30.glBindVertexArray(0)
 
     // ============================================================================
-    // Texture Resolution
+    // Rendering (SceneTree-based, generic — no changes needed for new entities)
     // ============================================================================
 
-    def resolveTexture(textures: Textures, kind: Game.TextureKind): Int32 =
-        match kind {
-            case Game.TextureKind.Background => textures#background
-            case Game.TextureKind.Block => textures#block
-            case Game.TextureKind.BlockSolid => textures#blockSolid
-            case Game.TextureKind.Paddle => textures#paddle
-            case Game.TextureKind.Ball => textures#ball
-        }
-
-    // ============================================================================
-    // Rendering
-    // ============================================================================
-
-    def renderState(state: Game.GameState, textures: Textures, shader: Int32, vao: Int32): Unit \ IO =
+    def renderScene(scene: SceneTree.Node, registry: Game.TextureRegistry, shader: Int32, vao: Int32): Unit \ IO =
         GL11.glClearColor(0.0f32, 0.0f32, 0.0f32, 1.0f32);
         GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
 
-        // Draw background
-        let bgPos = {x = 0.0f32, y = 0.0f32};
-        let bgSize = {x = Int32.toFloat32(Game.screenWidth()), y = Int32.toFloat32(Game.screenHeight())};
-        drawSprite(shader, resolveTexture(textures, Game.TextureKind.Background), vao, bgPos, bgSize, {r = 1.0f32, g = 1.0f32, b = 1.0f32});
-
-        // Draw level bricks
-        let currentLevel = List.nth(state#currentLevel, state#levels);
-        match currentLevel {
-            case Some(level) => drawBricks(level#bricks, textures, shader, vao)
-            case None => ()
-        };
-
-        // Draw player paddle
-        drawSprite(shader, resolveTexture(textures, state#player#textureKind), vao, state#player#position, state#player#size, state#player#color);
-
-        // Draw ball
-        let ballSize = {x = state#ballRadius * 2.0f32, y = state#ballRadius * 2.0f32};
-        drawSprite(shader, resolveTexture(textures, Game.TextureKind.Ball), vao, state#ballPos, ballSize, {r = 1.0f32, g = 1.0f32, b = 1.0f32})
-
-    def drawBricks(bricks: List[Game.GameObject], textures: Textures, shader: Int32, vao: Int32): Unit \ IO =
-        List.forEach(brick -> {
-            if (not brick#destroyed) {
-                drawSprite(shader, resolveTexture(textures, brick#textureKind), vao, brick#position, brick#size, brick#color)
-            } else ()
-        }, bricks)
+        let drawables = SceneTree.collectDrawables(scene, Vec2D.zero());
+        List.forEach(match (spriteData, globalPos) -> {
+            match Map.get(spriteData#texture, registry) {
+                case Some(texId) => drawSprite(shader, texId, vao, globalPos, spriteData#size, spriteData#color)
+                case None => ()
+            }
+        }, drawables)
 
     // ============================================================================
     // LWJGL Handler for Game.Game effect
@@ -296,7 +241,9 @@ mod LwjglLayer {
         setProjectionMatrix(shader, Int32.toFloat32(Game.screenWidth()), Int32.toFloat32(Game.screenHeight()));
 
         let (vao, _vbo) = initSpriteRenderer();
-        let textures = loadTextures();
+
+        println("Loading textures...");
+        let registry = loadTextureRegistry(Game.textureManifest());
 
         println("Loading levels...");
 
@@ -310,8 +257,8 @@ mod LwjglLayer {
                 println("Game ready! Press ESC or close window to exit.");
                 k(state)
             }
-            def render(state, k) = {
-                renderState(state, textures, shader, vao);
+            def render(scene, k) = {
+                renderScene(scene, registry, shader, vao);
                 GLFW.glfwSwapBuffers(window);
                 k(())
             }
